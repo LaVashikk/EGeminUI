@@ -107,7 +107,7 @@ const TEMPLATE_HINT_TEXT: &str =
     "A system prompt for the model. E.g., 'You are a helpful assistant that specializes in writing Rust code.'";
 
 impl ModelPicker {
-    pub fn create_client(&self, api_key: &str) -> Gemini {
+    pub fn create_client(&self, api_key: &str, proxy_path: Option<String>) -> Gemini {
         let sys_prompt = if let Some(sys_prompt) = &self.system_prompt {
             if !sys_prompt.is_empty() {
                 Some(SystemInstruction::from_str(sys_prompt.clone()))
@@ -122,6 +122,7 @@ impl ModelPicker {
             api_key.to_string(),
             self.selected.to_string(), 
             sys_prompt,
+            proxy_path
         );
 
         let val = client.set_generation_config();
@@ -162,9 +163,8 @@ impl ModelPicker {
                 ui.label("Enable custom system prompt");
             });
             if !enabled {
-                // todo: why? remove?
                 self.system_prompt = None;
-            } else {
+            } else if self.system_prompt.is_none() {
                 self.system_prompt = Some(String::new());
             }
 
@@ -486,7 +486,8 @@ pub struct Settings {
     pub api_key: String,
     pub model_picker: ModelPicker,
     pub inherit_chat_picker: bool,
-    pub use_streaming: bool
+    pub use_streaming: bool,
+    pub proxy_path: Option<String>,
 }
 
 impl Default for Settings {
@@ -496,6 +497,7 @@ impl Default for Settings {
             model_picker: ModelPicker::default(),
             inherit_chat_picker: true,
             use_streaming: true,
+            proxy_path: None,
         }
     }
 }
@@ -590,6 +592,29 @@ impl Settings {
         ui.separator();
 
         ui.heading("Miscellaneous");
+
+        let mut enabled = self.proxy_path.is_some();
+        ui.horizontal(|ui| {
+            ui.add(toggle(&mut enabled));
+            help(ui, "Use the proxy for gemini api request", |ui| {
+                ui.label("Use proxy");
+            });
+        });
+        if !enabled {
+            self.proxy_path = None;
+        } else if self.proxy_path.is_none() {
+            self.proxy_path = Some(String::from("socks5://127.0.0.1:2080"));
+        }
+
+        ui.add_enabled_ui(self.proxy_path.is_some(), |ui| {
+            if let Some(ref mut template) = self.proxy_path {
+                ui.add(
+                    egui::TextEdit::singleline(template)
+                        .hint_text("http://your_proxy_address:port")
+                        .desired_rows(3),
+                );
+            }
+        });
 
         ui.label("Reset global settings to defaults");
         if ui.button("Reset").clicked() {

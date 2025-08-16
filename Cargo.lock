@@ -1900,8 +1900,6 @@ dependencies = [
 [[package]]
 name = "gemini-client-api"
 version = "5.4.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2e85e8a50ab53b7a4ddd485adce6f67418eb0ca8fd3bdd5bc58de14ae9b9b0c"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -4078,6 +4076,7 @@ dependencies = [
  "system-configuration",
  "tokio",
  "tokio-native-tls",
+ "tokio-socks",
  "tokio-util",
  "tower",
  "tower-service",
@@ -4916,6 +4915,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8e727b36a1a0e8b74c376ac2211e40c2c8af09fb4013c60d910495810f008e9b"
 dependencies = [
  "rustls",
+ "tokio",
+]
+
+[[package]]
+name = "tokio-socks"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d4770b8024672c1101b3f6733eab95b18007dbe0847a8afe341fcf79e06043f"
+dependencies = [
+ "either",
+ "futures-util",
+ "thiserror 1.0.69",
  "tokio",
 ]
 

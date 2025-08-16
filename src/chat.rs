@@ -719,7 +719,7 @@ impl Chat {
         let no_api_key = settings.api_key.is_empty();
         let use_streaming = settings.use_streaming;
 
-        let gemini = self.model_picker.create_client(&settings.api_key);
+        let gemini = self.model_picker.create_client(&settings.api_key, settings.proxy_path.clone());
 
         tokio::spawn(async move {
             handle.activate();
