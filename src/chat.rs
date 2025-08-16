@@ -308,15 +308,14 @@ impl Message {
 
         // copy buttons and such
         let shift_held = !ui.ctx().wants_keyboard_input() && ui.input(|i| i.modifiers.shift);
-        if !self.is_generating
-            && !self.content.is_empty()
-            && (!self.is_user() || shift_held)
-            && !self.is_error
+
+        if !self.is_generating && !self.is_error
         {
             ui.add_space(2.0);
             ui.horizontal(|ui| {
                 ui.add_space(message_offset);
-                let copy = ui
+                if !self.content.is_empty() {
+                    let copy = ui
                     .add(
                         egui::Button::new(if self.clicked_copy { "✔" } else { "🗐" })
                             .small()
@@ -327,11 +326,12 @@ impl Message {
                     } else {
                         "Copy message"
                     });
-                if copy.clicked() {
-                    ui.ctx().copy_text(self.content.clone());
-                    self.clicked_copy = true;
+                    if copy.clicked() {
+                        ui.ctx().copy_text(self.content.clone());
+                        self.clicked_copy = true;
+                    }
+                    self.clicked_copy = self.clicked_copy && copy.hovered();
                 }
-                self.clicked_copy = self.clicked_copy && copy.hovered();
 
                 #[cfg(feature = "tts")]
                 {
@@ -355,6 +355,17 @@ impl Message {
                         self.is_speaking = true;
                         tts_control(tts, self.content.clone(), true);
                     }
+                }
+
+                if ui.add(
+                    egui::Button::new("🗑")
+                        .small()
+                        .fill(egui::Color32::TRANSPARENT),
+                    )
+                    .on_hover_text("Remove")
+                    .clicked()
+                {
+                    dbg!("not implemented yer!");
                 }
 
                 if !self.is_user()
@@ -434,6 +445,7 @@ async fn request_completion(
     handle: &CompletionFlowerHandle,
     stop_generating: Arc<AtomicBool>,
     index: usize,
+    use_streaming: bool,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     log::info!(
         "requesting completion... (history length: {})",
@@ -479,32 +491,75 @@ async fn request_completion(
         }
     }
 
-    // todo: add ability DO NOT use streamind
-    let mut stream = gemini
-        .ask_as_stream(gemini_session)
-        .await
-        .map_err(|err| err.1)?; 
-
-    log::info!("reading response...");
     let mut response_text = String::new();
-    while let Some(Ok(res)) = stream.next().await {
-        if stop_generating.load(Ordering::SeqCst) {
-            log::info!("stopping generation");
-            drop(stream);
-            stop_generating.store(false, Ordering::SeqCst);
-            break;
-        }
+    if use_streaming {
+        let mut stream = gemini
+            .ask_as_stream(gemini_session)
+            .await
+            .map_err(|err| err.1)?; 
 
-        for part in res.get_parts() {
-            handle.send((index, part.clone()));
-            match part {
-                Part::text(info) => {
-                    response_text += info.text();
+        log::info!("reading response...");
+        while let Some(Ok(res)) = stream.next().await {
+            if stop_generating.load(Ordering::SeqCst) {
+                log::info!("stopping generation");
+                drop(stream);
+                stop_generating.store(false, Ordering::SeqCst);
+                break;
+            }
+
+            for part in res.get_parts() {
+                handle.send((index, part.clone()));
+                match part {
+                    Part::text(info) => {
+                        response_text += info.text();
+                    }
+                    _ => {}
                 }
-                _ => {}
+            }
+        }
+    } else {
+        let cancellation_checker = async {
+            loop {
+                if stop_generating.load(Ordering::SeqCst) {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await; 
+            }
+        };
+
+        log::info!("sending non-streaming request...");
+        tokio::select! {  // todo some working bullshit
+            biased;
+
+            _ = cancellation_checker => {
+                log::info!("non-streaming generation cancelled by user.");
+                stop_generating.store(false, Ordering::SeqCst); 
+            }
+
+            result = gemini.ask(&mut gemini_session) => {
+                match result {
+                    Ok(response) => {
+                        log::info!("reading non-streamed response...");
+                        let mut response_text = String::new();
+                        for part in response.get_parts() {
+                            handle.send((index, part.clone()));
+                            if let Part::text(info) = part {
+                                response_text += info.text();
+                            }
+                        }
+                        log::info!(
+                            "non-streaming completion request complete, response length: {}",
+                            response_text.len()
+                        );
+                        handle.success((index, response_text));
+                        return Ok(());
+                    }
+                    Err(err) => return Err(err)?,
+                }
             }
         }
     }
+    
 
     log::info!(
         "completion request complete, response length: {}",
@@ -662,6 +717,8 @@ impl Chat {
         let index = self.messages.len() - 1;
 
         let no_api_key = settings.api_key.is_empty();
+        let use_streaming = settings.use_streaming;
+
         let gemini = self.model_picker.create_client(&settings.api_key);
 
         tokio::spawn(async move {
@@ -672,7 +729,7 @@ impl Chat {
                 return;
             }
 
-            let _ = request_completion(gemini, messages, &handle, stop_generation, index)
+            let _ = request_completion(gemini, messages, &handle, stop_generation, index, use_streaming)
                 .await
                 .map_err(|e| {
                     log::error!("failed to request completion: {e}");
@@ -790,35 +847,34 @@ impl Chat {
 
                 match part {
                     Part::text(data) => {
-                        // Безопасно используем unwrap, так как мы всегда добавляем
-                        // сообщение-заглушку в send_message перед запуском.
+                        // Safely use unwrap, as we always add
+                        // a placeholder message in send_message before running.
                         let current_response_msg = self.messages.last_mut().unwrap();
-                        dbg!(&current_response_msg);
-
+                        
                         if *data.thought() {
-                            // Это мысль
+                            // This is a thought
                             if !current_response_msg.is_thought {
-                                // Если это первая часть "мысли", превращаем наше
-                                // сообщение-заглушку в полноценное сообщение для "мыслей".
+                                // If this is the first part of a "thought", turn our
+                                // placeholder message into a full "thought" message.
                                 current_response_msg.is_thought = true;
                             }
-                            // Просто дописываем текст "мысли".
+                            // Just append the "thought" text.
                             current_response_msg.content.push_str(data.text());
                         } else {
                             if current_response_msg.is_thought {
-                                // "Мысли" только что закончились. Выключаем для них спиннер.
+                                // "Thoughts" have just ended. Turn off the spinner for them.
                                 current_response_msg.is_generating = false;
 
-                                // И создаем НОВОЕ, отдельное сообщение для финального ответа.
-                                // Это сохранит блок с мыслями на экране.
+                                // And create a NEW, separate message for the final answer.
+                                // This will keep the thought block on screen.
                                 let model = current_response_msg.model;
                                 let mut answer_message =
                                     Message::assistant(data.text().into(), model);
-                                answer_message.is_generating = true; // У него свой спиннер.
+                                answer_message.is_generating = true; // It has its own spinner.
                                 self.messages.push(answer_message);
                             } else {
-                                // Либо "мыслей" не было, либо это продолжение ответа.
-                                // Просто дописываем текст в текущее последнее сообщение.
+                                // Either there were no "thoughts", or this is a continuation of the answer.
+                                // Just append the text to the current last message.
                                 current_response_msg.content.push_str(data.text());
                             }
                         }

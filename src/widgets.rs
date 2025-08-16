@@ -486,6 +486,7 @@ pub struct Settings {
     pub api_key: String,
     pub model_picker: ModelPicker,
     pub inherit_chat_picker: bool,
+    pub use_streaming: bool
 }
 
 impl Default for Settings {
@@ -494,6 +495,7 @@ impl Default for Settings {
             api_key: String::new(), // todo try read from env
             model_picker: ModelPicker::default(),
             inherit_chat_picker: true,
+            use_streaming: true,
         }
     }
 }
@@ -575,6 +577,16 @@ impl Settings {
         ui.add_space(2.0);
         self.model_picker.show(ui, request_info);
 
+        ui.separator();
+        ui.heading("Behavior");
+        ui.horizontal(|ui| {
+            ui.add(toggle(&mut self.use_streaming));
+            help(ui, "Receive the response as it's being generated. Disabling this will wait for the full response before displaying it", |ui| {
+                ui.label("Stream response");
+            });
+        });
+
+        // ui.end_row();
         ui.separator();
 
         ui.heading("Miscellaneous");
