@@ -462,29 +462,94 @@ async fn request_completion(
         &messages
     };
 
-    for message in messages_to_process {
-        let mut parts = Vec::new();
-        if !message.content.is_empty() {
-            parts.push(Part::text(message.content.clone().into()));
-        }
+    // let mut last_model = false;
+    // for message in messages_to_process {
+    //     let mut parts = Vec::new();
+    //     if !message.content.is_empty() {
+    //         parts.push(Part::text(message.content.clone().into()));
+    //     } else {
+    //         eprintln!("empty shit? {}", message.content)
+    //     }
 
-        for image_path in &message.images { // todo change `images` to `files` 
-            match convert_image_to_part(image_path).await {
-                Ok(part) => parts.push(part),
-                Err(e) => log::error!("Failed to convert image {}: {}", image_path.display(), e),
-            }
-        }
-        if parts.is_empty() {
+    //     for image_path in &message.images { // todo change `images` to `files` 
+    //         match convert_image_to_part(image_path).await {
+    //             Ok(part) => parts.push(part),
+    //             Err(e) => log::error!("Failed to convert image {}: {}", image_path.display(), e),
+    //         }
+    //     }
+    //     if parts.is_empty() || message.is_thought {
+    //         continue;
+    //     }
+
+    //     if message.is_user() {
+    //         // gemini_session.ask(parts);
+    //         last_model = false
+    //     } else {
+    //         // gemini_session.reply(parts);
+    //         last_model = true
+    //     }
+    // }
+    
+    // A buffer to hold parts for the current consecutive group of messages.
+    let mut parts_buffer = Vec::new();
+    // Tracks the author of the current group. `None` means we're at the start.
+    let mut current_author_is_user: Option<bool> = None;
+
+    for message in messages_to_process {
+        // Skip messages that should not be part of the conversation history.
+        if message.is_thought || (message.content.is_empty() && message.images.is_empty()) {
             continue;
         }
 
-        if message.is_user() {
-            gemini_session.ask(parts);
-        } else {
-            gemini_session.reply(parts);
+        let message_author_is_user = message.is_user();
+
+        // Check if the author has changed from the previous message.
+        // `current_author.is_some()` handles the very first message.
+        if current_author_is_user.is_some() && current_author_is_user != Some(message_author_is_user) {
+            // Author has changed. The previous group is complete. Submit it.
+            // Use `std::mem::take` to efficiently swap the buffer with an empty Vec.
+            let completed_parts = std::mem::take(&mut parts_buffer);
+            if !completed_parts.is_empty() {
+                if current_author_is_user.unwrap() { // unwrap is safe here
+                    gemini_session.ask(completed_parts);
+                } else {
+                    gemini_session.reply(completed_parts);
+                }
+            }
+        }
+
+        // -- Process the current message and add its parts to the buffer --
+
+        // Update the author for the current (or new) group.
+        current_author_is_user = Some(message_author_is_user);
+        
+        if !message.content.is_empty() {
+            parts_buffer.push(Part::text(message.content.clone().into()));
+        }
+
+        for image_path in &message.images {
+            match convert_image_to_part(image_path).await {
+                Ok(part) => parts_buffer.push(part),
+                Err(e) => log::error!("Failed to convert image {}: {}", image_path.display(), e),
+            }
         }
     }
-    // Handle the prepended text for regeneration
+
+    // After the loop, the last group of messages might still be in the buffer.
+    // We need to submit this final batch.
+    if !parts_buffer.is_empty() {
+        if let Some(is_user) = current_author_is_user {
+            if is_user {
+                gemini_session.ask(parts_buffer);
+            } else {
+                gemini_session.reply(parts_buffer);
+            }
+        }
+    } 
+
+    dbg!(&gemini_session);
+
+    // Handle the prepended text for regeneration // TODO BROKEN!
     if let Some(msg) = messages.get(index) {
         if !msg.content.is_empty() {
             gemini_session.reply(vec![Part::text(msg.content.clone().into())]);
@@ -713,8 +778,18 @@ impl Chat {
     fn spawn_completion(&self, settings: &Settings) {
         let handle = self.flower.handle();
         let stop_generation = self.stop_generating.clone();
-        let messages = self.messages.clone();
+        let mut messages = self.messages.clone();
         let index = self.messages.len() - 1;
+
+        if settings.include_thoughts_in_history {
+            for msg in &mut messages {
+                if msg.is_thought {
+                    msg.is_thought = false;
+                    msg.content.insert_str(0, "MY INNER REFLECTIONS: ");
+                    msg.content.push_str(r"--- end of inner reflections ---\r\n")
+                }
+            }
+        }
 
         let no_api_key = settings.api_key.is_empty();
         let use_streaming = settings.use_streaming;

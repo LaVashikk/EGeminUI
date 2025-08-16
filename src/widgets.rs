@@ -487,6 +487,7 @@ pub struct Settings {
     pub model_picker: ModelPicker,
     pub inherit_chat_picker: bool,
     pub use_streaming: bool,
+    pub include_thoughts_in_history: bool,
     pub proxy_path: Option<String>,
 }
 
@@ -497,6 +498,7 @@ impl Default for Settings {
             model_picker: ModelPicker::default(),
             inherit_chat_picker: true,
             use_streaming: true,
+            include_thoughts_in_history: false,
             proxy_path: None,
         }
     }
@@ -587,6 +589,12 @@ impl Settings {
                 ui.label("Stream response");
             });
         });
+        ui.horizontal(|ui| {
+            ui.add(toggle(&mut self.include_thoughts_in_history));
+            help(ui, "When enabled, the model's 'thought' parts are appended to the session context for subsequent requests. Warning: This will rapidly increase token consumption", |ui| {
+                ui.label("Persist Thoughts in Context");
+            });
+        });
 
         // ui.end_row();
         ui.separator();
@@ -606,15 +614,12 @@ impl Settings {
             self.proxy_path = Some(String::from("socks5://127.0.0.1:2080"));
         }
 
-        ui.add_enabled_ui(self.proxy_path.is_some(), |ui| {
-            if let Some(ref mut template) = self.proxy_path {
-                ui.add(
-                    egui::TextEdit::singleline(template)
-                        .hint_text("http://your_proxy_address:port")
-                        .desired_rows(3),
-                );
-            }
-        });
+        if let Some(ref mut template) = self.proxy_path {
+            ui.add(
+            egui::TextEdit::singleline(template)
+                        .hint_text("http://your_proxy_address:port"),
+            );
+        }
 
         ui.label("Reset global settings to defaults");
         if ui.button("Reset").clicked() {
