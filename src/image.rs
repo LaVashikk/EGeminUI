@@ -1,38 +1,48 @@
 use anyhow::Result;
-use base64_stream::ToBase64Reader;
+use base64::Engine;
 use eframe::egui::{self, vec2, Color32, Rect, RichText, Stroke};
+use gemini_client_api::gemini::types::request::{InlineData, Part};
 use image::ImageFormat;
-use ollama_rs::generation::images::Image;
 use std::{
     fs::File,
-    io::{BufReader, Cursor, Read},
+    io::{BufReader, Cursor},
     path::{Path, PathBuf},
 };
 
-pub fn convert_image(path: &Path) -> Result<Image> {
-    let f = BufReader::new(File::open(path)?);
+pub async fn convert_image_to_part(path: &Path) -> Result<Part> {
+    // Read the entire file into a byte vector asynchronously.
+    let image_bytes = tokio::fs::read(path).await?;
 
-    // ollama only supports png and jpeg, we have to convert to png
-    // whenever needed
-    let format = ImageFormat::from_path(path)?;
-    if !matches!(format, ImageFormat::Png | ImageFormat::Jpeg) {
+    // Guess the image format from the byte slice.
+    let format = image::guess_format(&image_bytes)?;
+    let mime_type = mime_guess::from_path(path).first_or_octet_stream();
+
+    // The final bytes to be encoded. This might be the original bytes or converted bytes.
+    let final_bytes = if !matches!(format, ImageFormat::Png | ImageFormat::Jpeg) {
         log::debug!("got {format:?} image, converting to png");
-        let img = image::load(f, format)?;
+        // image::load needs a reader that implements Read + Seek. A Cursor is perfect for this.
+        let reader = Cursor::new(&image_bytes);
+        let img = image::load(reader, format)?;
+
+        // Write the converted image (as PNG) into a new buffer.
         let mut buf = Vec::new();
         img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Png)?;
-        let mut reader = ToBase64Reader::new(buf.as_slice());
-        let mut base64 = String::new();
-        reader.read_to_string(&mut base64)?;
-        log::debug!("converted to {} bytes of base64", base64.len());
-        return Ok(Image::from_base64(&base64));
-    }
+        buf
+    } else {
+        // No conversion needed, use the original bytes.
+        image_bytes
+    };
 
-    // otherwise, ollama can handle it
-    let mut reader = ToBase64Reader::new(f);
-    let mut base64 = String::new();
-    reader.read_to_string(&mut base64)?;
-    log::debug!("read image to {} bytes of base64", base64.len());
-    Ok(Image::from_base64(&base64))
+    let base64 = base64::engine::general_purpose::STANDARD.encode(&final_bytes);
+    log::debug!(
+        "converted image to {} bytes of base64 with mime type {}",
+        base64.len(),
+        mime_type
+    );
+    Ok(Part::inline_data(InlineData::new(
+        mime_type.to_string(),
+        base64,
+    )))
 }
 
 pub fn show_images(ui: &mut egui::Ui, images: &mut Vec<PathBuf>, mutate: bool) {

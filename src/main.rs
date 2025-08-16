@@ -2,7 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
 use eframe::egui;
-use ollama_rs::Ollama;
+use gemini_client_api::gemini::ask::Gemini;
 use sessions::Sessions;
 
 mod chat;
@@ -12,11 +12,12 @@ mod sessions;
 mod style;
 mod widgets;
 
-const TITLE: &str = "Ellama";
+const TITLE: &str = "Gemini GUI";
 const IMAGE_FORMATS: &[&str] = &[
     "bmp", "dds", "ff", "gif", "hdr", "ico", "jpeg", "jpg", "exr", "png", "pnm", "qoi", "tga",
     "tiff", "webp",
 ];
+const VIDEO_FORMATS: &[&str] = &["TODO"]; // todo!!
 
 fn load_icon() -> egui::IconData {
     let (icon_rgba, icon_width, icon_height) = {
@@ -51,22 +52,11 @@ async fn main() {
     .expect("failed to run app");
 }
 
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Default, serde::Deserialize, serde::Serialize)]
 struct Ellama {
     sessions: Sessions,
-    #[serde(skip)]
-    ollama: Ollama,
 }
 
-impl Default for Ellama {
-    fn default() -> Self {
-        let ollama = Ollama::default();
-        Self {
-            sessions: Sessions::new(ollama.clone()),
-            ollama,
-        }
-    }
-}
 
 impl Ellama {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -83,8 +73,6 @@ impl Ellama {
         if let Some(storage) = cc.storage {
             if let Some(mut app_state) = eframe::get_value::<Self>(storage, eframe::APP_KEY) {
                 log::debug!("app state successfully restored from storage");
-                app_state.ollama = app_state.sessions.settings.make_ollama();
-                app_state.sessions.list_models(app_state.ollama.clone());
                 return app_state;
             }
         }
@@ -92,14 +80,14 @@ impl Ellama {
         log::debug!("app state is not saved in storage, using default app state");
 
         // default app
-
         Self::default()
     }
 }
 
 impl eframe::App for Ellama {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.sessions.show(ctx, &self.ollama);
+        ctx.set_pixels_per_point(1.2);
+        self.sessions.show(ctx);
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {

@@ -13,6 +13,9 @@ homepage = "https://github.com/zeozeozeo/ellama"
 repository = "https://github.com/zeozeozeo/ellama"
 authors = ["zeozeozeo <i@zeo.lol>"]
 
+[lints.rust]
+unused = { level = "allow", priority = -1 } # For exploratory dev.
+
 [package.metadata.wix]
 upgrade-guid = "0A1DD80C-A3CE-4FF9-87D6-E42AE70FA2D3"
 path-guid = "978B4217-AC4F-48DC-BF7B-AA02673D1E39"
@@ -35,7 +38,6 @@ egui_commonmark = { git = "https://github.com/zeozeozeo/egui_commonmark.git", br
 env_logger = "0.11"
 flowync = { version = "5.1", features = ["compact"] }
 log = "0.4.27"
-ollama-rs = { version = "0.3.1", features = ["rustls", "stream"] }
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
 egui-modal = { git = "https://github.com/zeozeozeo/egui-modal.git", branch = "egui-0.31" }
@@ -61,6 +63,11 @@ egui_extras = { version = "0.31.1", features = ["file", "image"] }
 base64-stream = "4.0"
 url = "2"
 openssl = { version = "0.10.73", features = ["vendored"] }
+gemini-client-api = "5.4.7"
+mime_guess = "2.0.5"
+base64 = "0.22.1"
+enum-iterator = "2.1.0"
+
 
 [features]
 default = []

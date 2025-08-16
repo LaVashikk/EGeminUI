@@ -3,24 +3,28 @@ use crate::sessions::SharedTts;
 
 use crate::{
     easymark::MemoizedEasymarkHighlighter,
-    widgets::{self, ModelPicker},
+    image::convert_image_to_part,
+    widgets::{self, GeminiModel, ModelPicker, Settings},
 };
 use anyhow::{Context, Result};
-use eframe::egui::{
-    self, pos2, vec2, Align, Color32, CornerRadius, Frame, Key, KeyboardShortcut, Layout, Margin,
-    Modifiers, Pos2, Rect, Stroke, TextStyle,
+use eframe::{
+    egui::{
+        self, pos2, vec2, Align, Color32, CornerRadius, Frame, Key, KeyboardShortcut, Layout,
+        Margin, Modifiers, Pos2, Rect, Stroke, TextStyle,
+    },
+    epaint::text,
 };
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 use egui_modal::{Icon, Modal};
 use egui_virtual_list::VirtualList;
 use flowync::{error::Compact, CompactFlower, CompactHandle};
-use ollama_rs::{
-    generation::{
-        chat::{request::ChatMessageRequest, ChatMessage, ChatMessageResponseStream},
-        images::Image,
+use gemini_client_api::gemini::{
+    ask::Gemini,
+    types::{
+        request::{Part, SystemInstruction},
+        response::GeminiResponseStream,
+        sessions::Session,
     },
-    models::ModelOptions,
-    Ollama,
 };
 use std::{
     io::Write,
@@ -39,10 +43,10 @@ enum Role {
     Assistant,
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct Message {
-    model_name: String,
+    model: GeminiModel,
     content: String,
     role: Role,
     #[serde(skip)]
@@ -57,6 +61,7 @@ pub struct Message {
     is_speaking: bool,
     images: Vec<PathBuf>,
     is_prepending: bool,
+    is_thought: bool,
 }
 
 impl Default for Message {
@@ -70,9 +75,10 @@ impl Default for Message {
             clicked_copy: false,
             is_error: false,
             is_speaking: false,
-            model_name: String::new(),
+            model: GeminiModel::default(),
             images: Vec::new(),
             is_prepending: false,
+            is_thought: false,
         }
     }
 }
@@ -96,25 +102,18 @@ fn tts_control(tts: SharedTts, text: String, speak: bool) {
     });
 }
 
-/// Convert a model name into a short name.
-///
-/// # Example
-///
-/// - nous-hermes2:latest -> Nous
-/// - gemma:latest -> Gemma
-/// - starling-lm:7b-beta-q5_K_M -> Starling
-/// - bambucha/saiga-llama3 -> Saiga
-fn make_short_name(name: &str) -> String {
-    let mut c = name
-        .split('/')
-        .nth(1)
-        .unwrap_or(name)
-        .chars()
-        .take_while(|c| c.is_alphanumeric());
-    match c.next() {
-        None => "Llama".to_string(),
-        Some(f) => f.to_uppercase().collect::<String>() + c.collect::<String>().as_str(),
-    }
+fn make_short_name(name: &str) -> String { // todo lmao
+    // let mut c = name
+    //     .split('/')
+    //     .next()
+    //     .unwrap_or(name)
+    //     .chars()
+    //     .take_while(|c| c.is_alphanumeric());
+    // match c.next() {
+    //     None => "Gemini".to_string(),
+    //     Some(f) => f.to_uppercase().collect::<String>() + c.collect::<String>().as_str(),
+    // }
+    "Gemini".to_string()
 }
 
 enum MessageAction {
@@ -125,24 +124,24 @@ enum MessageAction {
 
 impl Message {
     #[inline]
-    fn user(content: String, model_name: String, images: Vec<PathBuf>) -> Self {
+    fn user(content: String, model: GeminiModel, images: Vec<PathBuf>) -> Self {
         Self {
             content,
             role: Role::User,
             is_generating: false,
-            model_name,
+            model,
             images,
             ..Default::default()
         }
     }
 
     #[inline]
-    fn assistant(content: String, model_name: String) -> Self {
+    fn assistant(content: String, model: GeminiModel) -> Self {
         Self {
             content,
             role: Role::Assistant,
             is_generating: true,
-            model_name,
+            model,
             ..Default::default()
         }
     }
@@ -167,21 +166,42 @@ impl Message {
                     let f = ui.label("👤").rect.left();
                     ui.label("You").rect.left() - f
                 } else {
-                    let f = ui.label("🐱").rect.left();
+                    let f = ui.label("✨").rect.left();
                     let offset = ui
-                        .label(make_short_name(&self.model_name))
-                        .on_hover_text(&self.model_name)
+                        .label(make_short_name(&self.model.to_string()))
+                        .on_hover_text(&self.model.to_string())
                         .rect
                         .left()
                         - f;
-                    ui.add_enabled(false, egui::Label::new(&self.model_name));
+                    ui.add_enabled(false, egui::Label::new(&self.model.to_string()));
                     offset
                 }
             })
             .inner;
 
-        // for some reason commonmark creates empty space above it when created,
-        // compensate for that
+        if self.is_thought {
+            ui.horizontal(|ui| {
+                ui.add_space(message_offset);
+                let done_thinking = !self.is_generating;
+                Frame::group(ui.style())
+                    .inner_margin(Margin::symmetric(8, 4))
+                    .show(ui, |ui| {
+                        // egui::collapsing_header::CollapsingState::load_with_default_open
+                        egui::CollapsingHeader::new("  Thoughts")
+                            .id_salt(self.time.timestamp_millis())
+                            .default_open(false)
+                            .icon(move |ui, openness, response| {
+                                widgets::thinking_icon(ui, openness, response, done_thinking);
+                            })
+                            .show(ui, |ui| {
+                                CommonMarkViewer::new().show(ui, commonmark_cache, &self.content);
+                            });
+                    });
+            });
+            ui.add_space(4.0);
+            return MessageAction::None;
+        }
+
         let is_commonmark = !self.content.is_empty() && !self.is_error && !self.is_prepending;
         if is_commonmark {
             ui.add_space(-TextStyle::Body.resolve(ui.style()).size + 4.0);
@@ -192,7 +212,6 @@ impl Message {
         ui.horizontal(|ui| {
             ui.add_space(message_offset);
             if self.content.is_empty() && self.is_generating && !self.is_error {
-                //self.done_thinking = true;
                 ui.horizontal(|ui| {
                     ui.add(egui::Spinner::new());
 
@@ -206,11 +225,11 @@ impl Message {
                     )
                 });
             } else if self.is_error {
-                ui.label("An error occurred while requesting completion");
+                ui.label(self.content.clone());
                 if ui
                     .button("Retry")
                     .on_hover_text(
-                        "Try to generate a response again. Make sure you have Ollama running",
+                        "Try to generate a response again. Make sure you have a valid API Key.",
                     )
                     .clicked()
                 {
@@ -259,21 +278,11 @@ impl Message {
                     }
                 });
             } else {
-                let (content, done_thinking) =
-                    widgets::remove_blank_lines_in_thinking_tags(&self.content);
-                let is_generating = self.is_generating;
-
-                CommonMarkViewer::new()
-                    .max_image_width(Some(512))
-                    .render_html_fn(Some(&move |ui: &mut egui::Ui, html: &str| {
-                        widgets::html_think_render(
-                            ui,
-                            html,
-                            format!("thoughts-{idx}"),
-                            done_thinking || !is_generating,
-                        );
-                    }))
-                    .show(ui, commonmark_cache, &content);
+                CommonMarkViewer::new().max_image_width(Some(512)).show(
+                    ui,
+                    commonmark_cache,
+                    &self.content,
+                );
             }
         });
 
@@ -371,8 +380,8 @@ impl Message {
 }
 
 // <completion progress, final completion, error>
-type CompletionFlower = CompactFlower<(usize, String), (usize, String), (usize, String)>;
-type CompletionFlowerHandle = CompactHandle<(usize, String), (usize, String), (usize, String)>;
+type CompletionFlower = CompactFlower<(usize, Part), (usize, String), (usize, String)>;
+type CompletionFlowerHandle = CompactHandle<(usize, Part), (usize, String), (usize, String)>;
 
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
@@ -419,15 +428,11 @@ impl Default for Chat {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn request_completion(
-    ollama: Ollama,
-    messages: Vec<ChatMessage>,
+    mut gemini: Gemini,
+    messages: Vec<Message>,
     handle: &CompletionFlowerHandle,
     stop_generating: Arc<AtomicBool>,
-    selected_model: String,
-    options: ModelOptions,
-    template: Option<String>,
     index: usize,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     log::info!(
@@ -435,59 +440,77 @@ async fn request_completion(
         messages.len()
     );
 
-    // if any assistant message was prepended, save it so we can prepend it
-    // to the final response
-    let prepend = {
-        if let Some(last) = messages.last() {
-            if last.role == ollama_rs::generation::chat::MessageRole::Assistant {
-                last.content.clone()
-            } else {
-                String::new()
-            }
-        } else {
-            String::new()
-        }
+    // Build a gemini-client-api session from the message history
+    let mut gemini_session = Session::new(messages.len());
+
+    // Regenerate from a certain point if needed
+    let messages_to_process = if messages.get(index).map_or(false, |m| m.is_generating) {
+        &messages[..index]
+    } else {
+        &messages
     };
 
-    let mut request = ChatMessageRequest::new(selected_model, messages).options(options);
-    if let Some(template) = template {
-        request = request.template(template);
-    }
-    let mut stream: ChatMessageResponseStream = ollama.send_chat_messages_stream(request).await?;
+    for message in messages_to_process {
+        let mut parts = Vec::new();
+        if !message.content.is_empty() {
+            parts.push(Part::text(message.content.clone().into()));
+        }
 
-    log::info!("reading response...");
-
-    let mut response = String::new();
-    let mut is_whitespace = true;
-
-    while let Some(Ok(res)) = stream.next().await {
-        if is_whitespace && res.message.content.trim().is_empty() {
+        for image_path in &message.images { // todo change `images` to `files` 
+            match convert_image_to_part(image_path).await {
+                Ok(part) => parts.push(part),
+                Err(e) => log::error!("Failed to convert image {}: {}", image_path.display(), e),
+            }
+        }
+        if parts.is_empty() {
             continue;
         }
-        let content = if is_whitespace {
-            res.message.content.trim_start()
+
+        if message.is_user() {
+            gemini_session.ask(parts);
         } else {
-            &res.message.content
-        };
-        is_whitespace = false;
+            gemini_session.reply(parts);
+        }
+    }
+    // Handle the prepended text for regeneration
+    if let Some(msg) = messages.get(index) {
+        if !msg.content.is_empty() {
+            gemini_session.reply(vec![Part::text(msg.content.clone().into())]);
+        }
+    }
 
-        // send message to gui thread
-        handle.send((index, content.to_string()));
-        response += content;
+    // todo: add ability DO NOT use streamind
+    let mut stream = gemini
+        .ask_as_stream(gemini_session)
+        .await
+        .map_err(|err| err.1)?; 
 
+    log::info!("reading response...");
+    let mut response_text = String::new();
+    while let Some(Ok(res)) = stream.next().await {
         if stop_generating.load(Ordering::SeqCst) {
             log::info!("stopping generation");
             drop(stream);
             stop_generating.store(false, Ordering::SeqCst);
             break;
         }
+
+        for part in res.get_parts() {
+            handle.send((index, part.clone()));
+            match part {
+                Part::text(info) => {
+                    response_text += info.text();
+                }
+                _ => {}
+            }
+        }
     }
 
     log::info!(
         "completion request complete, response length: {}",
-        response.len()
+        response_text.len()
     );
-    handle.success((index, prepend + response.trim()));
+    handle.success((index, response_text));
     Ok(())
 }
 
@@ -543,7 +566,7 @@ pub async fn export_messages(
                     "{} - {:?} ({}): {}",
                     msg.time.to_rfc3339(),
                     msg.role,
-                    msg.model_name,
+                    msg.model,
                     msg.content
                 )?;
             }
@@ -607,43 +630,7 @@ impl Chat {
         self.flower.id()
     }
 
-    fn convert_images(images: &[PathBuf]) -> Option<Vec<Image>> {
-        if !images.is_empty() {
-            Some(
-                images
-                    .iter()
-                    // TODO: handle errors
-                    .map(|i| {
-                        crate::image::convert_image(i)
-                            .map_err(|e| log::error!("failed to convert image: {e}"))
-                            .unwrap()
-                    })
-                    .collect(),
-            )
-        } else {
-            None
-        }
-    }
-
-    fn get_context_messages(messages: &[Message]) -> Vec<ChatMessage> {
-        messages
-            .iter()
-            .map(|m| {
-                let mut message = match m.role {
-                    Role::User => ChatMessage::user(m.content.clone()),
-                    Role::Assistant => ChatMessage::assistant(m.content.clone()),
-                };
-
-                // TODO: don't do this each time!
-                message.images = Self::convert_images(&m.images);
-
-                message
-            })
-            .collect()
-    }
-
-    fn send_message(&mut self, ollama: &Ollama) {
-        // don't send empty messages
+    fn send_message(&mut self, settings: &Settings) {
         if self.chatbox.is_empty() && self.images.is_empty() {
             return;
         }
@@ -652,79 +639,53 @@ impl Chat {
         self.messages.retain(|m| !m.is_error);
 
         let prompt = self.chatbox.trim_end().to_string();
-        let model_name = self.model_picker.selected_model().to_owned();
-        self.messages.push(Message::user(
-            prompt.clone(),
-            model_name.clone(),
-            self.images.clone(),
-        ));
+        let model = self.model_picker.selected;
+        self.messages
+            .push(Message::user(prompt.clone(), model, self.images.clone()));
 
         if self.summary.is_empty() {
             self.summary = make_summary(&prompt);
         }
 
-        // clear chatbox & images
         self.chatbox.clear();
         self.images.clear();
 
-        // get ready for assistant response
-        self.messages
-            .push(Message::assistant(String::new(), model_name.clone()));
+        self.messages.push(Message::assistant(String::new(), model));
 
-        self.spawn_completion(
-            ollama.clone(),
-            Self::get_context_messages(&self.messages),
-            model_name,
-        );
+        self.spawn_completion(settings);
     }
 
-    /// spawn a new task to generate the completion
-    fn spawn_completion(
-        &self,
-        ollama: Ollama,
-        context_messages: Vec<ChatMessage>,
-        model_name: String,
-    ) {
-        let handle = self.flower.handle(); // recv'd by gui thread
+    fn spawn_completion(&self, settings: &Settings) {
+        let handle = self.flower.handle();
         let stop_generation = self.stop_generating.clone();
-        let generation_options = self.model_picker.get_generation_options();
-        let template = self.model_picker.template.clone();
+        let messages = self.messages.clone();
         let index = self.messages.len() - 1;
+
+        let no_api_key = settings.api_key.is_empty();
+        let gemini = self.model_picker.create_client(&settings.api_key);
+
         tokio::spawn(async move {
             handle.activate();
-            let _ = request_completion(
-                ollama,
-                context_messages,
-                &handle,
-                stop_generation,
-                model_name,
-                generation_options,
-                template,
-                index,
-            )
-            .await
-            .map_err(|e| {
-                log::error!("failed to request completion: {e}");
-                handle.error((index, e.to_string()));
-            });
+
+            if no_api_key {
+                handle.error((index, "API key not set.".to_string()));
+                return;
+            }
+
+            let _ = request_completion(gemini, messages, &handle, stop_generation, index)
+                .await
+                .map_err(|e| {
+                    log::error!("failed to request completion: {e}");
+                    handle.error((index, e.to_string()));
+                });
         });
     }
 
-    fn regenerate_response(&mut self, ollama: &Ollama, idx: usize) {
-        // remake context history to make the message we want to regenerate last
-        let mut messages = Self::get_context_messages(&self.messages[..idx]);
-
-        // start with the prepended message and update it in the displayed messages
-        messages.push(ChatMessage::assistant(self.prepend_buf.clone()));
+    fn regenerate_response(&mut self, settings: &Settings, idx: usize) { // todo: regenerate works weird
         self.messages[idx].content = self.prepend_buf.clone();
         self.prepend_buf.clear();
 
-        // start completing the message
-        self.spawn_completion(
-            ollama.clone(),
-            messages,
-            self.messages[idx].model_name.clone(),
-        );
+        self.spawn_completion(settings);
     }
 
     fn show_chatbox(
@@ -732,14 +693,15 @@ impl Chat {
         ui: &mut egui::Ui,
         is_max_height: bool,
         is_generating: bool,
-        ollama: &Ollama,
+        settings: &Settings,
     ) -> ChatAction {
         let mut action = ChatAction::None;
         if let Some(idx) = self.retry_message_idx.take() {
             self.chatbox = self.messages[idx - 1].content.clone();
-            self.messages.remove(idx); // remove assistant message
-            self.messages.remove(idx - 1); // remove user message
-            self.send_message(ollama);
+            self.images = self.messages[idx - 1].images.clone();
+            self.messages.remove(idx);
+            self.messages.remove(idx - 1);
+            self.send_message(settings);
         }
 
         if is_max_height {
@@ -797,7 +759,7 @@ impl Chat {
                     if !is_generating
                         && ui.input(|i| i.key_pressed(Key::Enter) && i.modifiers.is_none())
                     {
-                        self.send_message(ollama);
+                        self.send_message(settings);
                     }
                 },
             );
@@ -816,32 +778,96 @@ impl Chat {
     }
 
     pub fn poll_flower(&mut self, modal: &mut Modal) {
+        let mut last_processed_idx = self.messages.len().saturating_sub(1);
+
         self.flower
-            .extract(|(idx, progress)| {
-                self.messages[idx].content += progress.as_str();
+            .extract(|(idx, part)| {
+                last_processed_idx = idx;
+                let model = self
+                    .messages
+                    .get(idx - 1)
+                    .map_or(GeminiModel::default(), |m| m.model);
+
+                match part {
+                    Part::text(data) => {
+                        // Безопасно используем unwrap, так как мы всегда добавляем
+                        // сообщение-заглушку в send_message перед запуском.
+                        let current_response_msg = self.messages.last_mut().unwrap();
+                        dbg!(&current_response_msg);
+
+                        if *data.thought() {
+                            // Это мысль
+                            if !current_response_msg.is_thought {
+                                // Если это первая часть "мысли", превращаем наше
+                                // сообщение-заглушку в полноценное сообщение для "мыслей".
+                                current_response_msg.is_thought = true;
+                            }
+                            // Просто дописываем текст "мысли".
+                            current_response_msg.content.push_str(data.text());
+                        } else {
+                            if current_response_msg.is_thought {
+                                // "Мысли" только что закончились. Выключаем для них спиннер.
+                                current_response_msg.is_generating = false;
+
+                                // И создаем НОВОЕ, отдельное сообщение для финального ответа.
+                                // Это сохранит блок с мыслями на экране.
+                                let model = current_response_msg.model;
+                                let mut answer_message =
+                                    Message::assistant(data.text().into(), model);
+                                answer_message.is_generating = true; // У него свой спиннер.
+                                self.messages.push(answer_message);
+                            } else {
+                                // Либо "мыслей" не было, либо это продолжение ответа.
+                                // Просто дописываем текст в текущее последнее сообщение.
+                                current_response_msg.content.push_str(data.text());
+                            }
+                        }
+                    }
+                    _ => todo!(),
+                }
             })
             .finalize(|result| {
-                if let Ok((idx, content)) = result {
-                    let message = &mut self.messages[idx];
-                    message.content = content.clone();
-                    message.is_generating = false;
-                } else if let Err(e) = result {
+                if let Ok((idx, _)) = result {} else if let Err(e) = result {
                     let (idx, msg) = match e {
                         Compact::Panicked(e) => {
                             (self.messages.len() - 1, format!("Tokio task panicked: {e}"))
                         }
                         Compact::Suppose((idx, e)) => (idx, e),
                     };
+
+                    let mut clean_msg = msg
+                        .strip_prefix("StatusNotOk(\"")
+                        .unwrap_or(&msg)
+                        .to_string();
+                    if clean_msg.ends_with("\")") {
+                        clean_msg.pop();
+                        clean_msg.pop();
+                    }
+                    let formatted_msg = clean_msg.replace("\\n", "\n").replace("\\\"", "\"");
+                    let final_msg = match serde_json::from_str::<serde_json::Value>(&formatted_msg)
+                    {
+                        Ok(json_value) => {
+                            serde_json::to_string_pretty(&json_value).unwrap_or(formatted_msg)
+                        }
+                        Err(_) => formatted_msg,
+                    };
+
                     let message = &mut self.messages[idx];
-                    message.content = msg.clone();
+                    message.content = final_msg.clone();
                     message.is_error = true;
                     modal
                         .dialog()
-                        .with_body(msg)
+                        .with_body(final_msg)
                         .with_title("Failed to generate completion!")
                         .with_icon(Icon::Error)
                         .open();
                     message.is_generating = false;
+                }
+
+                if let Some(last_msg) = self.messages.last_mut() {
+                    if last_msg.is_generating {
+                        last_msg.is_generating = false;
+                    }
                 }
             });
     }
@@ -902,7 +928,7 @@ impl Chat {
     fn show_chat_scrollarea(
         &mut self,
         ui: &mut egui::Ui,
-        ollama: &Ollama,
+        settings: &Settings,
         commonmark_cache: &mut CommonMarkCache,
         #[cfg(feature = "tts")] tts: SharedTts,
     ) -> Option<usize> {
@@ -948,37 +974,33 @@ impl Chat {
                     });
             });
         if let Some(regenerate_idx) = regenerate_response_idx {
-            self.regenerate_response(ollama, regenerate_idx);
+            self.regenerate_response(settings, regenerate_idx);
         }
         new_speaker
     }
 
-    fn send_text(&mut self, ollama: &Ollama, text: &str) {
+    fn send_text(&mut self, settings: &Settings, text: &str) {
         self.chatbox = text.to_owned();
-        self.send_message(ollama);
+        self.send_message(settings);
     }
 
-    fn show_suggestions(&mut self, ui: &mut egui::Ui, ollama: &Ollama) {
+    fn show_suggestions(&mut self, ui: &mut egui::Ui, settings: &Settings) {
+        // todo broken weird shit :p
         egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
             widgets::centerer(ui, |ui| {
                 let avail_width = ui.available_rect_before_wrap().width() - 24.0;
                 ui.horizontal(|ui| {
-                    ui.heading("Ellama");
-                    if !self.model_picker.selected_model().is_empty() {
-                        ui.add_enabled_ui(false, |ui| {
-                            ui.heading(format!("({})", self.model_picker.selected_model()));
-                        });
-                    }
+                    ui.heading(format!("{}", self.model_picker.selected.to_string().replace("-", " "))); // todo improve it
                 });
                 egui::Grid::new("suggestions_grid")
                     .num_columns(3)
                     .max_col_width((avail_width / 2.0).min(200.0))
                     .spacing(vec2(6.0, 6.0))
-                    .show(ui, |ui| {
+                    .show(ui, |ui| { // TODO change it
                         if widgets::suggestion(ui, "Tell me a fun fact", "about the Roman empire")
                             .clicked()
                         {
-                            self.send_text(ollama, "Tell me a fun fact about the Roman empire");
+                            self.send_text(settings, "Tell me a fun fact about the Roman empire");
                         }
                         if widgets::suggestion(
                             ui,
@@ -988,7 +1010,7 @@ impl Chat {
                         .clicked()
                         {
                             self.send_text(
-                                ollama,
+                                settings,
                                 "Show me a code snippet of a web server in Rust",
                             );
                         }
@@ -996,12 +1018,12 @@ impl Chat {
                         ui.end_row();
 
                         if widgets::suggestion(ui, "Tell me a joke", "about crabs").clicked() {
-                            self.send_text(ollama, "Tell me a joke about crabs");
+                            self.send_text(settings, "Tell me a joke about crabs");
                         }
                         if widgets::suggestion(ui, "Give me ideas", "for a birthday present")
                             .clicked()
                         {
-                            self.send_text(ollama, "Give me ideas for a birthday present");
+                            self.send_text(settings, "Give me ideas for a birthday present");
                         }
                         widgets::dummy(ui);
                         ui.end_row();
@@ -1013,7 +1035,7 @@ impl Chat {
     pub fn show(
         &mut self,
         ctx: &egui::Context,
-        ollama: &Ollama,
+        settings: &Settings,
         #[cfg(feature = "tts")] tts: SharedTts,
         #[cfg(feature = "tts")] stopped_speaking: bool,
         commonmark_cache: &mut CommonMarkCache,
@@ -1033,7 +1055,7 @@ impl Chat {
                         ui,
                         chatbox_panel_height >= max_height,
                         is_generating,
-                        ollama,
+                        settings,
                     );
                 });
             });
@@ -1049,13 +1071,14 @@ impl Chat {
                 bottom: 3,
             }))
             .show(ctx, |ui| {
+                // ui.ctx().set_debug_on_hover(true); // TODO DEBUG
                 if self.messages.is_empty() {
-                    self.show_suggestions(ui, ollama);
+                    self.show_suggestions(ui, settings);
                 } else {
                     #[allow(unused_variables)]
                     if let Some(new) = self.show_chat_scrollarea(
                         ui,
-                        ollama,
+                        settings,
                         commonmark_cache,
                         #[cfg(feature = "tts")]
                         tts,

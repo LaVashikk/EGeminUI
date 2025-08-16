@@ -9,10 +9,7 @@ use egui_notify::{Toast, Toasts};
 use egui_twemoji::EmojiLabel;
 use egui_virtual_list::VirtualList;
 use flowync::{CompactFlower, CompactHandle};
-use ollama_rs::{
-    models::{LocalModel, ModelInfo},
-    Ollama,
-};
+use gemini_client_api::gemini::ask::Gemini;
 #[cfg(feature = "tts")]
 use parking_lot::RwLock;
 #[cfg(feature = "tts")]
@@ -29,53 +26,16 @@ enum SessionTab {
 
 #[cfg(feature = "tts")]
 pub type SharedTts = Option<Arc<RwLock<Tts>>>;
-
-enum OllamaResponse {
+enum BackendResponse {
     Ignore,
-    Models(Vec<LocalModel>),
-    ModelInfo { name: String, info: ModelInfo },
     Toast(Toast),
     Images { id: usize, files: Vec<PathBuf> },
     Settings(Box<Settings>),
 }
 
-#[derive(Default, PartialEq, Eq)]
-enum OllamaFlowerActivity {
-    /// Idle, default
-    #[default]
-    Idle,
-    /// List models
-    ListModels,
-    /// Get model info
-    ModelInfo,
-}
-
 // <progress, response, error>
-type OllamaFlower = CompactFlower<(), OllamaResponse, String>;
-type OllamaFlowerHandle = CompactHandle<(), OllamaResponse, String>;
-
-#[derive(Default, serde::Serialize, serde::Deserialize)]
-struct SelectedModel {
-    name: String,
-    #[serde(default)]
-    modified_ago: String,
-    modified_at: String,
-    size: u64,
-}
-
-impl From<LocalModel> for SelectedModel {
-    fn from(model: LocalModel) -> Self {
-        let ago = chrono::DateTime::parse_from_rfc3339(&model.modified_at)
-            .map(|time| timeago::Formatter::new().convert_chrono(time, chrono::Utc::now()))
-            .unwrap_or_else(|e| e.to_string());
-        Self {
-            name: model.name,
-            modified_ago: ago,
-            modified_at: model.modified_at,
-            size: model.size,
-        }
-    }
-}
+type BackendFlower = CompactFlower<(), BackendResponse, String>;
+type BackendFlowerHandle = CompactHandle<(), BackendResponse, String>;
 
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
@@ -94,15 +54,9 @@ pub struct Sessions {
     #[serde(skip)]
     commonmark_cache: CommonMarkCache,
     #[serde(skip)]
-    flower: OllamaFlower,
-    #[serde(skip)]
-    models: Vec<LocalModel>,
-    #[serde(skip)]
-    flower_activity: OllamaFlowerActivity,
+    flower: BackendFlower,
     #[serde(skip)]
     last_request_time: Instant,
-    #[serde(skip)]
-    pending_model_infos: HashMap<String, ()>,
     #[serde(skip)]
     virtual_list: Rc<RefCell<VirtualList>>,
     edited_chat: Option<usize>,
@@ -129,11 +83,8 @@ impl Default for Sessions {
                 .map(|tts| Arc::new(RwLock::new(tts)))
                 .ok(),
             commonmark_cache: CommonMarkCache::default(),
-            flower: OllamaFlower::new(1),
-            models: Vec::new(),
-            flower_activity: OllamaFlowerActivity::default(),
+            flower: BackendFlower::new(1),
             last_request_time: now,
-            pending_model_infos: HashMap::new(),
             virtual_list: Rc::new(RefCell::new({
                 let mut list = VirtualList::new();
                 list.check_for_resize(false);
@@ -148,78 +99,48 @@ impl Default for Sessions {
     }
 }
 
-async fn list_local_models(ollama: Ollama, handle: &OllamaFlowerHandle) {
-    log::debug!("requesting local models...");
-    match ollama.list_local_models().await {
-        Ok(models) => {
-            log::debug!("{} local models: {models:?}", models.len());
-            handle.success(OllamaResponse::Models(models));
-        }
-        Err(e) => {
-            log::error!("failed to list local models: {e}");
-            handle.error(e.to_string());
-        }
-    }
-}
-
-async fn request_model_info(ollama: Ollama, model_name: String, handle: &OllamaFlowerHandle) {
-    match ollama.show_model_info(model_name.clone()).await {
-        Ok(info) => {
-            log::debug!("model `{model_name}` info: {info:?}");
-            handle.success(OllamaResponse::ModelInfo {
-                name: model_name,
-                info,
-            });
-        }
-        Err(e) => {
-            log::error!("failed to request model `{model_name}` info: {e}");
-            handle.error(e.to_string());
-        }
-    }
-}
-
-async fn pick_images(id: usize, handle: &OllamaFlowerHandle) {
+async fn pick_images(id: usize, handle: &BackendFlowerHandle) {
     let Some(files) = rfd::AsyncFileDialog::new()
         .add_filter("Image", crate::IMAGE_FORMATS)
         .pick_files()
         .await
     else {
-        handle.success(OllamaResponse::Ignore);
+        handle.success(BackendResponse::Ignore);
         return;
     };
 
     log::info!("selected {} image(s)", files.len());
 
-    handle.success(OllamaResponse::Images {
+    handle.success(BackendResponse::Images {
         id,
         files: files.iter().map(|f| f.path().to_path_buf()).collect(),
     });
 }
 
-async fn load_settings(handle: &OllamaFlowerHandle) {
+async fn load_settings(handle: &BackendFlowerHandle) {
     let Some(file) = rfd::AsyncFileDialog::new()
         .add_filter("JSON file", &["json"])
         .pick_file()
         .await
     else {
-        handle.success(OllamaResponse::Toast(Toast::info("No file selected")));
+        handle.success(BackendResponse::Toast(Toast::info("No file selected")));
         return;
     };
 
     log::info!("reading settings from `{}`", file.path().display());
     let Ok(f) = std::fs::File::open(file.path()).map_err(|e| {
         log::error!("failed to open file `{}`: {e}", file.path().display());
-        handle.success(OllamaResponse::Toast(Toast::error(e.to_string())));
+        handle.success(BackendResponse::Toast(Toast::error(e.to_string())));
     }) else {
         return;
     };
 
     let settings = serde_json::from_reader(std::io::BufReader::new(f));
     if let Ok(settings) = settings {
-        handle.success(OllamaResponse::Settings(settings));
+        handle.success(BackendResponse::Settings(settings));
     } else if let Err(e) = settings {
         log::error!("failed to load settings: {e}");
-        handle.success(OllamaResponse::Toast(Toast::error(e.to_string())));
+        handle.success(BackendResponse::Toast(Toast::error(e.to_string())));
     }
 }
 
@@ -258,48 +179,12 @@ fn preview_files_being_dropped(ctx: &egui::Context) {
 }
 
 impl Sessions {
-    pub fn new(ollama: Ollama) -> Self {
-        let mut sessions = Self::default();
-        sessions.list_models(ollama);
-        sessions
+    pub fn new() -> Self { // todo
+        Self::default()
     }
 
-    pub fn list_models(&mut self, ollama: Ollama) {
-        let handle = self.flower.handle();
-        self.flower_activity = OllamaFlowerActivity::ListModels;
-        self.last_request_time = Instant::now();
-        tokio::spawn(async move {
-            handle.activate();
-            list_local_models(ollama, &handle).await;
-        });
-    }
 
-    fn request_model_info(&mut self, model_name: String, ollama: Ollama) {
-        // check if any chats have the info of this model
-        let handle = self.flower.handle();
-        for chat in &self.chats {
-            if chat.model_picker.selected_model() == model_name {
-                if let Some(info) = chat.model_picker.info.clone() {
-                    handle.activate();
-                    handle.success(OllamaResponse::ModelInfo {
-                        name: model_name.clone(),
-                        info,
-                    });
-                    return;
-                }
-            }
-        }
-
-        self.flower_activity = OllamaFlowerActivity::ModelInfo;
-        self.last_request_time = Instant::now();
-        self.pending_model_infos.insert(model_name.clone(), ());
-        tokio::spawn(async move {
-            handle.activate();
-            request_model_info(ollama, model_name, &handle).await;
-        });
-    }
-
-    pub fn show(&mut self, ctx: &egui::Context, ollama: &Ollama) {
+    pub fn show(&mut self, ctx: &egui::Context) {
         // check if tts stopped speaking
         #[cfg(feature = "tts")]
         let prev_is_speaking = self.is_speaking;
@@ -324,20 +209,6 @@ impl Sessions {
         let settings_modal =
             Modal::new(ctx, "global_settings_modal").with_close_on_outside_click(true);
 
-        // if self.edit_modal_open {
-        //     let mut open = self.edit_modal_open;
-        //     egui::Window::new("Edit Chat")
-        //         .collapsible(false)
-        //         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        //         .open(&mut open)
-        //         .show(ctx, |ui| {
-        //             self.show_edit_modal_inner(ui, ollama);
-        //         });
-        //     self.edit_modal_open = open;
-        // }
-
-        // show dialogs created on the previous frame, if we move this into the end of the function
-        // it won't be located in the center of the window but in the center of the centralpanel instead
         chat_modal.show_dialog();
         modal.show_dialog();
         self.settings.show_modal(&settings_modal);
@@ -360,7 +231,7 @@ impl Sessions {
         }
         if self.flower.is_active() {
             request_repaint = true;
-            self.poll_ollama_flower(&modal);
+            self.poll_backend_flower(&modal);
         }
 
         if request_repaint {
@@ -371,25 +242,9 @@ impl Sessions {
             self.edited_chat = None;
             egui::CentralPanel::default().show(ctx, |ui| {
                 egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
-                    let mut request_info_for: Option<String> = None;
-                    let mut list_models = false;
-
                     self.settings.show(
                         ui,
-                        if self.is_loading_models() {
-                            None
-                        } else {
-                            Some(&self.models)
-                        },
                         &mut |typ| match typ {
-                            RequestInfoType::ModelInfo(name) => {
-                                if !self.pending_model_infos.contains_key(name) {
-                                    request_info_for = Some(name.to_string());
-                                }
-                            }
-                            RequestInfoType::Models => {
-                                list_models = true;
-                            }
                             RequestInfoType::LoadSettings => {
                                 let handle = self.flower.handle();
                                 tokio::spawn(async move {
@@ -400,25 +255,17 @@ impl Sessions {
                         },
                         &settings_modal,
                     );
-
-                    if let Some(name) = request_info_for {
-                        self.request_model_info(name, ollama.clone());
-                    }
-                    if list_models {
-                        self.list_models(ollama.clone());
-                    }
                 });
             });
         } else if let Some(edited_chat) = self.edited_chat {
             egui::CentralPanel::default().show(ctx, |ui| {
                 egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
-                    self.show_chat_edit_panel(ui, edited_chat, ollama);
+                    self.show_chat_edit_panel(ui, edited_chat);
                 })
             });
         } else {
             self.show_selected_chat(
                 ctx,
-                ollama,
                 #[cfg(feature = "tts")]
                 (prev_is_speaking && !self.is_speaking),
             );
@@ -430,9 +277,9 @@ impl Sessions {
     }
 
     fn show_selected_chat(
+        // here: main chat
         &mut self,
         ctx: &egui::Context,
-        ollama: &Ollama,
         #[cfg(feature = "tts")] stopped_talking: bool,
     ) {
         let Some(chat) = self.chats.get_mut(self.selected_chat) else {
@@ -466,7 +313,7 @@ impl Sessions {
 
         let action = chat.show(
             ctx,
-            ollama,
+            &self.settings,
             #[cfg(feature = "tts")]
             self.tts.clone(),
             #[cfg(feature = "tts")]
@@ -523,7 +370,7 @@ impl Sessions {
         });
     }
 
-    fn show_chat_edit_panel(&mut self, ui: &mut egui::Ui, chat_idx: usize, ollama: &Ollama) {
+    fn show_chat_edit_panel(&mut self, ui: &mut egui::Ui, chat_idx: usize) {
         ui.horizontal(|ui| {
             let Some(chat) = self.chats.get(chat_idx) else {
                 return;
@@ -552,42 +399,17 @@ impl Sessions {
         egui::CollapsingHeader::new("Model")
             .default_open(true)
             .show(ui, |ui| {
-                let mut request_info_for: Option<String> = None;
-                let is_loading_models = self.is_loading_models();
                 let Some(chat) = self.chats.get_mut(chat_idx) else {
                     return;
                 };
-                let mut list_models = false;
+
                 chat.model_picker.show(
                     ui,
-                    if is_loading_models {
-                        None
-                    } else {
-                        Some(&self.models)
-                    },
-                    &mut |typ| match typ {
-                        RequestInfoType::ModelInfo(name) => {
-                            if !self.pending_model_infos.contains_key(name) {
-                                request_info_for = Some(name.to_string());
-                            }
-                        }
-                        RequestInfoType::Models => {
-                            list_models = true;
-                        }
-                        RequestInfoType::LoadSettings => (), // can't be called from here
-                    },
+                    &mut |_| {},
                 );
-                if let Some(name) = request_info_for {
-                    if self.settings.inherit_chat_picker
-                        && (name != self.settings.model_picker.selected_model())
-                    {
-                        self.settings.model_picker.selected = chat.model_picker.selected.clone();
-                    }
 
-                    self.request_model_info(name, ollama.clone());
-                }
-                if list_models {
-                    self.list_models(ollama.clone());
+                if self.settings.inherit_chat_picker {
+                    self.settings.model_picker.selected = chat.model_picker.selected.clone();
                 }
             });
         ui.collapsing("Export", |ui| {
@@ -623,9 +445,9 @@ impl Sessions {
 
                     handle.activate();
                     if let Ok(toast) = toast {
-                        handle.success(OllamaResponse::Toast(toast))
+                        handle.success(BackendResponse::Toast(toast))
                     } else if let Err(e) = toast {
-                        handle.success(OllamaResponse::Toast(Toast::error(e.to_string())))
+                        handle.success(BackendResponse::Toast(Toast::error(e.to_string())))
                     };
                 });
             }
@@ -660,49 +482,27 @@ impl Sessions {
         &self.settings.model_picker
     }
 
-    fn poll_ollama_flower(&mut self, modal: &Modal) {
+    fn poll_backend_flower(&mut self, modal: &Modal) {
         self.flower.extract(|()| ()).finalize(|resp| {
-            self.flower_activity = OllamaFlowerActivity::Idle;
             match resp {
-                Ok(OllamaResponse::Ignore) => (),
-                Ok(OllamaResponse::Models(models)) => {
-                    self.models = models;
-                    if !self.settings.model_picker.has_selection() {
-                        self.settings.model_picker.select_best_model(&self.models);
-
-                        // for each chat with unselected models, select the best model
-                        for chat in self.chats.iter_mut() {
-                            if !chat.model_picker.has_selection() {
-                                chat.model_picker.selected =
-                                    self.settings.model_picker.selected.clone();
-                            }
-                        }
-                    }
-                }
-                Ok(OllamaResponse::ModelInfo { name, info }) => {
-                    self.pending_model_infos.remove(&name);
-                    self.settings.model_picker.on_new_model_info(&name, &info);
-                    for chat in self.chats.iter_mut() {
-                        chat.model_picker.on_new_model_info(&name, &info);
-                    }
-                }
-                Ok(OllamaResponse::Toast(toast)) => {
+                Ok(BackendResponse::Ignore) => (),
+                Ok(BackendResponse::Toast(toast)) => {
                     self.toasts.add(toast);
                 }
-                Ok(OllamaResponse::Images { id, files }) => {
+                Ok(BackendResponse::Images { id, files }) => {
                     if let Some(chat) = self.chats.iter_mut().find(|c| c.id() == id) {
                         log::debug!("adding {} image(s)", files.len());
                         chat.images.extend(files);
                     }
                 }
-                Ok(OllamaResponse::Settings(settings)) => {
+                Ok(BackendResponse::Settings(settings)) => {
                     self.settings = *settings;
                 }
                 Err(flowync::error::Compact::Suppose(e)) => {
                     modal
                         .dialog()
                         .with_icon(Icon::Error)
-                        .with_title("Ollama request failed")
+                        .with_title("Request failed")
                         .with_body(e)
                         .open();
                 }
@@ -711,17 +511,12 @@ impl Sessions {
                     modal
                         .dialog()
                         .with_icon(Icon::Error)
-                        .with_title("Ollama request task panicked")
+                        .with_title("Task panicked")
                         .with_body(format!("Task panicked: {e}"))
                         .open();
                 }
             };
         });
-    }
-
-    #[inline]
-    fn is_loading_models(&self) -> bool {
-        self.flower.is_active() && self.flower_activity == OllamaFlowerActivity::ListModels
     }
 
     #[inline]
