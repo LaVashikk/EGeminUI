@@ -156,10 +156,23 @@ pub fn show_files(ui: &mut egui::Ui, files: &mut Vec<PathBuf>, mutate: bool) {
                         )
                         .truncate(),
                     )
-                    .on_hover_text(path_string);
                 });
             })
             .response;
+
+        // again stupid hacks for egu
+        let interact_resp = ui.interact(resp.rect, resp.id.with("interact"), egui::Sense::click())
+            .on_hover_text(&path_string);
+        if interact_resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        if !mutate && interact_resp.clicked() {
+            if is_exist {
+                if let Err(e) = open::that(&mut *file_path) {
+                    log::error!("Failed to open file {}: {}", file_path.display(), e);
+                }
+            }
+        }
 
         if !mutate || showing_x {
             return true;

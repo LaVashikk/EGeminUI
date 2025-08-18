@@ -2,7 +2,7 @@
 - [X] Message deletion
 - [X] Show total message generation time
 - [ ] Tokens counter
-- [ ] click to file opened it (?)
+- [X] click to file opened it
 - [X] Handle mime types properly
 - [ ] Cache uploaded files
 - [ ] Display code snippets properly
