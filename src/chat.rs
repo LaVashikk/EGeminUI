@@ -3,7 +3,7 @@ use crate::sessions::SharedTts;
 
 use crate::{
     easymark::MemoizedEasymarkHighlighter,
-    image::convert_image_to_part,
+    file_handler::convert_file_to_part,
     widgets::{self, GeminiModel, ModelPicker, Settings},
 };
 use anyhow::{Context, Result};
@@ -59,7 +59,7 @@ pub struct Message {
     is_error: bool,
     #[serde(skip)]
     is_speaking: bool,
-    images: Vec<PathBuf>,
+    files: Vec<PathBuf>,
     is_prepending: bool,
     is_thought: bool,
 }
@@ -76,7 +76,7 @@ impl Default for Message {
             is_error: false,
             is_speaking: false,
             model: GeminiModel::default(),
-            images: Vec::new(),
+            files: Vec::new(),
             is_prepending: false,
             is_thought: false,
         }
@@ -102,7 +102,8 @@ fn tts_control(tts: SharedTts, text: String, speak: bool) {
     });
 }
 
-fn make_short_name(name: &str) -> String { // todo lmao
+fn make_short_name(name: &str) -> String {
+    // todo lmao
     // let mut c = name
     //     .split('/')
     //     .next()
@@ -124,13 +125,13 @@ enum MessageAction {
 
 impl Message {
     #[inline]
-    fn user(content: String, model: GeminiModel, images: Vec<PathBuf>) -> Self {
+    fn user(content: String, model: GeminiModel, files: Vec<PathBuf>) -> Self {
         Self {
             content,
             role: Role::User,
             is_generating: false,
             model,
-            images,
+            files,
             ..Default::default()
         }
     }
@@ -286,16 +287,16 @@ impl Message {
             }
         });
 
-        // images
-        if !self.images.is_empty() {
+        // files
+        if !self.files.is_empty() {
             if is_commonmark {
                 ui.add_space(4.0);
             }
             ui.horizontal(|ui| {
                 ui.add_space(message_offset);
-                egui::ScrollArea::horizontal().show(ui, |ui| {
+                egui::ScrollArea::horizontal().id_salt(idx).show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        crate::image::show_images(ui, &mut self.images, false);
+                        crate::file_handler::show_files(ui, &mut self.files, false);
                     });
                 })
             });
@@ -309,23 +310,22 @@ impl Message {
         // copy buttons and such
         let shift_held = !ui.ctx().wants_keyboard_input() && ui.input(|i| i.modifiers.shift);
 
-        if !self.is_generating && !self.is_error
-        {
+        if !self.is_generating && !self.is_error {
             ui.add_space(2.0);
             ui.horizontal(|ui| {
                 ui.add_space(message_offset);
                 if !self.content.is_empty() {
                     let copy = ui
-                    .add(
-                        egui::Button::new(if self.clicked_copy { "✔" } else { "🗐" })
-                            .small()
-                            .fill(egui::Color32::TRANSPARENT),
-                    )
-                    .on_hover_text(if self.clicked_copy {
-                        "Copied!"
-                    } else {
-                        "Copy message"
-                    });
+                        .add(
+                            egui::Button::new(if self.clicked_copy { "✔" } else { "🗐" })
+                                .small()
+                                .fill(egui::Color32::TRANSPARENT),
+                        )
+                        .on_hover_text(if self.clicked_copy {
+                            "Copied!"
+                        } else {
+                            "Copy message"
+                        });
                     if copy.clicked() {
                         ui.ctx().copy_text(self.content.clone());
                         self.clicked_copy = true;
@@ -357,10 +357,11 @@ impl Message {
                     }
                 }
 
-                if ui.add(
-                    egui::Button::new("🗑")
-                        .small()
-                        .fill(egui::Color32::TRANSPARENT),
+                if ui
+                    .add(
+                        egui::Button::new("🗑")
+                            .small()
+                            .fill(egui::Color32::TRANSPARENT),
                     )
                     .on_hover_text("Remove")
                     .clicked()
@@ -398,22 +399,23 @@ type CompletionFlowerHandle = CompactHandle<(usize, Part), (usize, String), (usi
 #[serde(default)]
 pub struct Chat {
     chatbox: String,
+    pub messages: Vec<Message>,
+    pub summary: String,
+    stop_generating: Arc<AtomicBool>,
+    pub model_picker: ModelPicker,
+    pub files: Vec<PathBuf>,
+    prepend_buf: String,
+
     #[serde(skip)]
     chatbox_height: f32,
-    pub messages: Vec<Message>,
     #[serde(skip)]
     flower: CompletionFlower,
     #[serde(skip)]
     retry_message_idx: Option<usize>,
-    pub summary: String,
-    #[serde(skip)]
-    chatbox_highlighter: MemoizedEasymarkHighlighter,
-    stop_generating: Arc<AtomicBool>,
     #[serde(skip)]
     virtual_list: VirtualList,
-    pub model_picker: ModelPicker,
-    pub images: Vec<PathBuf>,
-    prepend_buf: String,
+    #[serde(skip)]
+    chatbox_highlighter: MemoizedEasymarkHighlighter,
 }
 
 impl Default for Chat {
@@ -433,7 +435,7 @@ impl Default for Chat {
                 list
             },
             model_picker: ModelPicker::default(),
-            images: Vec::new(),
+            files: Vec::new(),
             prepend_buf: String::new(),
         }
     }
@@ -462,34 +464,6 @@ async fn request_completion(
         &messages
     };
 
-    // let mut last_model = false;
-    // for message in messages_to_process {
-    //     let mut parts = Vec::new();
-    //     if !message.content.is_empty() {
-    //         parts.push(Part::text(message.content.clone().into()));
-    //     } else {
-    //         eprintln!("empty shit? {}", message.content)
-    //     }
-
-    //     for image_path in &message.images { // todo change `images` to `files` 
-    //         match convert_image_to_part(image_path).await {
-    //             Ok(part) => parts.push(part),
-    //             Err(e) => log::error!("Failed to convert image {}: {}", image_path.display(), e),
-    //         }
-    //     }
-    //     if parts.is_empty() || message.is_thought {
-    //         continue;
-    //     }
-
-    //     if message.is_user() {
-    //         // gemini_session.ask(parts);
-    //         last_model = false
-    //     } else {
-    //         // gemini_session.reply(parts);
-    //         last_model = true
-    //     }
-    // }
-    
     // A buffer to hold parts for the current consecutive group of messages.
     let mut parts_buffer = Vec::new();
     // Tracks the author of the current group. `None` means we're at the start.
@@ -497,7 +471,7 @@ async fn request_completion(
 
     for message in messages_to_process {
         // Skip messages that should not be part of the conversation history.
-        if message.is_thought || (message.content.is_empty() && message.images.is_empty()) {
+        if message.is_thought || (message.content.is_empty() && message.files.is_empty()) {
             continue;
         }
 
@@ -505,12 +479,15 @@ async fn request_completion(
 
         // Check if the author has changed from the previous message.
         // `current_author.is_some()` handles the very first message.
-        if current_author_is_user.is_some() && current_author_is_user != Some(message_author_is_user) {
+        if current_author_is_user.is_some()
+            && current_author_is_user != Some(message_author_is_user)
+        {
             // Author has changed. The previous group is complete. Submit it.
             // Use `std::mem::take` to efficiently swap the buffer with an empty Vec.
             let completed_parts = std::mem::take(&mut parts_buffer);
             if !completed_parts.is_empty() {
-                if current_author_is_user.unwrap() { // unwrap is safe here
+                if current_author_is_user.unwrap() {
+                    // unwrap is safe here
                     gemini_session.ask(completed_parts);
                 } else {
                     gemini_session.reply(completed_parts);
@@ -522,15 +499,15 @@ async fn request_completion(
 
         // Update the author for the current (or new) group.
         current_author_is_user = Some(message_author_is_user);
-        
+
         if !message.content.is_empty() {
             parts_buffer.push(Part::text(message.content.clone().into()));
         }
 
-        for image_path in &message.images {
-            match convert_image_to_part(image_path).await {
+        for file_path in &message.files {
+            match convert_file_to_part(file_path).await {
                 Ok(part) => parts_buffer.push(part),
-                Err(e) => log::error!("Failed to convert image {}: {}", image_path.display(), e),
+                Err(e) => log::error!("Failed to convert file {}: {}", file_path.display(), e), // todo say to ui
             }
         }
     }
@@ -545,9 +522,9 @@ async fn request_completion(
                 gemini_session.reply(parts_buffer);
             }
         }
-    } 
+    }
 
-    dbg!(&gemini_session);
+    // dbg!(&gemini_session);
 
     // Handle the prepended text for regeneration // TODO BROKEN!
     if let Some(msg) = messages.get(index) {
@@ -561,7 +538,7 @@ async fn request_completion(
         let mut stream = gemini
             .ask_as_stream(gemini_session)
             .await
-            .map_err(|err| err.1)?; 
+            .map_err(|err| err.1)?;
 
         log::info!("reading response...");
         while let Some(Ok(res)) = stream.next().await {
@@ -588,7 +565,7 @@ async fn request_completion(
                 if stop_generating.load(Ordering::SeqCst) {
                     break;
                 }
-                tokio::time::sleep(std::time::Duration::from_millis(300)).await; 
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
             }
         };
 
@@ -598,7 +575,7 @@ async fn request_completion(
 
             _ = cancellation_checker => {
                 log::info!("non-streaming generation cancelled by user.");
-                stop_generating.store(false, Ordering::SeqCst); 
+                stop_generating.store(false, Ordering::SeqCst);
             }
 
             result = gemini.ask(&mut gemini_session) => {
@@ -624,7 +601,6 @@ async fn request_completion(
             }
         }
     }
-    
 
     log::info!(
         "completion request complete, response length: {}",
@@ -732,7 +708,7 @@ fn make_summary(prompt: &str) -> String {
 #[derive(Debug, Clone, Copy)]
 pub enum ChatAction {
     None,
-    PickImages { id: usize },
+    PickFiles { id: usize },
 }
 
 impl Chat {
@@ -751,7 +727,7 @@ impl Chat {
     }
 
     fn send_message(&mut self, settings: &Settings) {
-        if self.chatbox.is_empty() && self.images.is_empty() {
+        if self.chatbox.is_empty() && self.files.is_empty() {
             return;
         }
 
@@ -761,14 +737,14 @@ impl Chat {
         let prompt = self.chatbox.trim_end().to_string();
         let model = self.model_picker.selected;
         self.messages
-            .push(Message::user(prompt.clone(), model, self.images.clone()));
+            .push(Message::user(prompt.clone(), model, self.files.clone()));
 
         if self.summary.is_empty() {
             self.summary = make_summary(&prompt);
         }
 
         self.chatbox.clear();
-        self.images.clear();
+        self.files.clear();
 
         self.messages.push(Message::assistant(String::new(), model));
 
@@ -786,7 +762,8 @@ impl Chat {
                 if msg.is_thought {
                     msg.is_thought = false;
                     msg.content.insert_str(0, "MY INNER REFLECTIONS: ");
-                    msg.content.push_str(r"--- end of inner reflections ---\r\n")
+                    msg.content
+                        .push_str(r"--- end of inner reflections ---\r\n")
                 }
             }
         }
@@ -794,7 +771,9 @@ impl Chat {
         let no_api_key = settings.api_key.is_empty();
         let use_streaming = settings.use_streaming;
 
-        let gemini = self.model_picker.create_client(&settings.api_key, settings.proxy_path.clone());
+        let gemini = self
+            .model_picker
+            .create_client(&settings.api_key, settings.proxy_path.clone());
 
         tokio::spawn(async move {
             handle.activate();
@@ -804,16 +783,24 @@ impl Chat {
                 return;
             }
 
-            let _ = request_completion(gemini, messages, &handle, stop_generation, index, use_streaming)
-                .await
-                .map_err(|e| {
-                    log::error!("failed to request completion: {e}");
-                    handle.error((index, e.to_string()));
-                });
+            let _ = request_completion(
+                gemini,
+                messages,
+                &handle,
+                stop_generation,
+                index,
+                use_streaming,
+            )
+            .await
+            .map_err(|e| {
+                log::error!("failed to request completion: {e}");
+                handle.error((index, e.to_string()));
+            });
         });
     }
 
-    fn regenerate_response(&mut self, settings: &Settings, idx: usize) { // todo: regenerate works weird
+    fn regenerate_response(&mut self, settings: &Settings, idx: usize) {
+        // todo: regenerate works weird
         self.messages[idx].content = self.prepend_buf.clone();
         self.prepend_buf.clear();
 
@@ -830,7 +817,7 @@ impl Chat {
         let mut action = ChatAction::None;
         if let Some(idx) = self.retry_message_idx.take() {
             self.chatbox = self.messages[idx - 1].content.clone();
-            self.images = self.messages[idx - 1].images.clone();
+            self.files = self.messages[idx - 1].files.clone();
             self.messages.remove(idx);
             self.messages.remove(idx - 1);
             self.send_message(settings);
@@ -840,11 +827,11 @@ impl Chat {
             ui.add_space(8.0);
         }
 
-        let images_height = if !self.images.is_empty() {
+        let images_height = if !self.files.is_empty() {
             ui.add_space(8.0);
             let height = ui
                 .horizontal(|ui| {
-                    crate::image::show_images(ui, &mut self.images, true);
+                    crate::file_handler::show_files(ui, &mut self.files, true);
                 })
                 .response
                 .rect
@@ -861,10 +848,10 @@ impl Chat {
                         .min_size(vec2(32.0, 32.0))
                         .corner_radius(CornerRadius::same(u8::MAX)),
                 )
-                .on_hover_text_at_pointer("Pick Images")
+                .on_hover_text_at_pointer("Pick files")
                 .clicked()
             {
-                action = ChatAction::PickImages { id: self.id() };
+                action = ChatAction::PickFiles { id: self.id() };
             }
             ui.with_layout(
                 Layout::left_to_right(Align::Center).with_main_justify(true),
@@ -925,7 +912,7 @@ impl Chat {
                         // Safely use unwrap, as we always add
                         // a placeholder message in send_message before running.
                         let current_response_msg = self.messages.last_mut().unwrap();
-                        
+
                         if *data.thought() {
                             // This is a thought
                             if !current_response_msg.is_thought {
@@ -958,7 +945,8 @@ impl Chat {
                 }
             })
             .finalize(|result| {
-                if let Ok((idx, _)) = result {} else if let Err(e) = result {
+                if let Ok((idx, _)) = result {
+                } else if let Err(e) = result {
                     let (idx, msg) = match e {
                         Compact::Panicked(e) => {
                             (self.messages.len() - 1, format!("Tokio task panicked: {e}"))
@@ -1121,13 +1109,17 @@ impl Chat {
             widgets::centerer(ui, |ui| {
                 let avail_width = ui.available_rect_before_wrap().width() - 24.0;
                 ui.horizontal(|ui| {
-                    ui.heading(format!("{}", self.model_picker.selected.to_string().replace("-", " "))); // todo improve it
+                    ui.heading(format!(
+                        "{}",
+                        self.model_picker.selected.to_string().replace("-", " ")
+                    )); // todo improve it
                 });
                 egui::Grid::new("suggestions_grid")
                     .num_columns(3)
                     .max_col_width((avail_width / 2.0).min(200.0))
                     .spacing(vec2(6.0, 6.0))
-                    .show(ui, |ui| { // TODO change it
+                    .show(ui, |ui| {
+                        // TODO change it
                         if widgets::suggestion(ui, "Tell me a fun fact", "about the Roman empire")
                             .clicked()
                         {

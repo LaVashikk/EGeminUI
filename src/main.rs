@@ -4,10 +4,9 @@
 use eframe::egui;
 use gemini_client_api::gemini::ask::Gemini;
 use sessions::Sessions;
-
 mod chat;
 mod easymark;
-mod image;
+mod file_handler;
 mod sessions;
 mod style;
 mod widgets;
@@ -17,7 +16,11 @@ const IMAGE_FORMATS: &[&str] = &[
     "bmp", "dds", "ff", "gif", "hdr", "ico", "jpeg", "jpg", "exr", "png", "pnm", "qoi", "tga",
     "tiff", "webp",
 ];
-const VIDEO_FORMATS: &[&str] = &["TODO"]; // todo!!
+const VIDEO_FORMATS: &[&str] = &["mp4", "mpeg", "mov", "avi", "flv", "webm"];
+const TEXT_FORMATS: &[&str] = &[
+    "txt", "md", "rs", "py", "js", "html", "css", "json", "toml", "yaml", "log", "csv", "pdf",
+];
+const MUSIC_FORMATS: &[&str] = &[]; // todo!
 
 fn load_icon() -> egui::IconData {
     let (icon_rgba, icon_width, icon_height) = {
@@ -56,7 +59,6 @@ async fn main() {
 struct Ellama {
     sessions: Sessions,
 }
-
 
 impl Ellama {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {

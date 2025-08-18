@@ -29,7 +29,7 @@ pub type SharedTts = Option<Arc<RwLock<Tts>>>;
 enum BackendResponse {
     Ignore,
     Toast(Toast),
-    Images { id: usize, files: Vec<PathBuf> },
+    Files { id: usize, files: Vec<PathBuf> },
     Settings(Box<Settings>),
 }
 
@@ -99,9 +99,22 @@ impl Default for Sessions {
     }
 }
 
-async fn pick_images(id: usize, handle: &BackendFlowerHandle) {
+async fn pick_files(id: usize, handle: &BackendFlowerHandle) {
     let Some(files) = rfd::AsyncFileDialog::new()
+        .add_filter(
+            "Media & Text",
+            &[
+                crate::IMAGE_FORMATS,
+                crate::VIDEO_FORMATS,
+                crate::MUSIC_FORMATS,
+                crate::TEXT_FORMATS,
+            ]
+            .concat(),
+        )
         .add_filter("Image", crate::IMAGE_FORMATS)
+        .add_filter("Video", crate::VIDEO_FORMATS)
+        .add_filter("Text", crate::TEXT_FORMATS)
+        .add_filter("Music", crate::MUSIC_FORMATS)
         .pick_files()
         .await
     else {
@@ -109,9 +122,9 @@ async fn pick_images(id: usize, handle: &BackendFlowerHandle) {
         return;
     };
 
-    log::info!("selected {} image(s)", files.len());
+    log::info!("selected {} file(s)", files.len());
 
-    handle.success(BackendResponse::Images {
+    handle.success(BackendResponse::Files {
         id,
         files: files.iter().map(|f| f.path().to_path_buf()).collect(),
     });
@@ -179,10 +192,10 @@ fn preview_files_being_dropped(ctx: &egui::Context) {
 }
 
 impl Sessions {
-    pub fn new() -> Self { // todo
+    pub fn new() -> Self {
+        // todo
         Self::default()
     }
-
 
     pub fn show(&mut self, ctx: &egui::Context) {
         // check if tts stopped speaking
@@ -293,20 +306,30 @@ impl Sessions {
                     let filename = path.file_name().unwrap_or_default().to_string_lossy();
                     let Some(ext) = path.extension().and_then(|s| s.to_str()) else {
                         log::warn!("dropped file `{}` has no extension", path.display());
-                        self.toasts
-                            .add(Toast::info(format!("Skipping non-image `{filename}`")));
+                        self.toasts.add(Toast::info(format!(
+                            "Skipping file with no extension: `{filename}`"
+                        )));
                         continue;
                     };
-                    if !crate::IMAGE_FORMATS.contains(&ext) {
+
+                    let all_formats: Vec<_> = [
+                        crate::IMAGE_FORMATS,
+                        crate::VIDEO_FORMATS,
+                        crate::TEXT_FORMATS,
+                        crate::MUSIC_FORMATS,
+                    ].concat();
+                    
+                    if !all_formats.contains(&ext.to_lowercase().as_str()) {
                         log::warn!(
                             "dropped file `{}` has unsupported extension `{ext}`",
                             path.display()
                         );
-                        self.toasts
-                            .add(Toast::info(format!("Skipping non-image `{filename}`")));
+                        self.toasts.add(Toast::info(format!(
+                            "Skipping unsupported file type: `{filename}`"
+                        )));
                         continue;
                     }
-                    chat.images.push(path.clone());
+                    chat.files.push(path.clone());
                 }
             }
         });
@@ -323,11 +346,11 @@ impl Sessions {
 
         match action {
             ChatAction::None => (),
-            ChatAction::PickImages { id } => {
+            ChatAction::PickFiles { id } => {
                 let handle = self.flower.handle();
                 tokio::spawn(async move {
                     handle.activate();
-                    pick_images(id, &handle).await;
+                    pick_files(id, &handle).await;
                 });
             }
         }
@@ -403,10 +426,7 @@ impl Sessions {
                     return;
                 };
 
-                chat.model_picker.show(
-                    ui,
-                    &mut |_| {},
-                );
+                chat.model_picker.show(ui, &mut |_| {});
 
                 if self.settings.inherit_chat_picker {
                     self.settings.model_picker.selected = chat.model_picker.selected.clone();
@@ -489,10 +509,10 @@ impl Sessions {
                 Ok(BackendResponse::Toast(toast)) => {
                     self.toasts.add(toast);
                 }
-                Ok(BackendResponse::Images { id, files }) => {
+                Ok(BackendResponse::Files { id, files }) => {
                     if let Some(chat) = self.chats.iter_mut().find(|c| c.id() == id) {
-                        log::debug!("adding {} image(s)", files.len());
-                        chat.images.extend(files);
+                        log::debug!("adding {} file(s) to chat {}", files.len(), id);
+                        chat.files.extend(files);
                     }
                 }
                 Ok(BackendResponse::Settings(settings)) => {

@@ -17,7 +17,7 @@ use serde_json::json;
 pub struct ModelPicker {
     pub selected: GeminiModel,
     settings: ModelSettings,
-    pub system_prompt: Option<String>, 
+    pub system_prompt: Option<String>,
 }
 
 pub enum RequestInfoType {
@@ -120,13 +120,13 @@ impl ModelPicker {
 
         let mut client = Gemini::new(
             api_key.to_string(),
-            self.selected.to_string(), 
+            self.selected.to_string(),
             sys_prompt,
-            proxy_path
+            proxy_path,
         );
 
         let val = client.set_generation_config();
-        *val = self.get_generation_config(); 
+        *val = self.get_generation_config();
 
         client
     }
@@ -185,7 +185,6 @@ impl ModelPicker {
         self.settings.clone().into()
     }
 }
-
 
 #[derive(Default, Clone, Deserialize, Serialize)]
 struct ModelSettings {
@@ -300,7 +299,7 @@ impl ModelSettings {
                 if !budget_enabled {
                     self.thinking_budget = None;
                 } else if self.thinking_budget.is_none() {
-                    self.thinking_budget = Some(-1); // -1 для динамического бюджета
+                    self.thinking_budget = Some(-1); // -1 for dynamic budget
                 }
 
                 if let Some(ref mut budget) = self.thinking_budget {
@@ -616,8 +615,7 @@ impl Settings {
 
         if let Some(ref mut template) = self.proxy_path {
             ui.add(
-            egui::TextEdit::singleline(template)
-                        .hint_text("http://your_proxy_address:port"),
+                egui::TextEdit::singleline(template).hint_text("http://your_proxy_address:port"),
             );
         }
 
@@ -687,4 +685,3 @@ pub fn thinking_icon(
         }
     }
 }
-
