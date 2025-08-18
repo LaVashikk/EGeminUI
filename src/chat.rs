@@ -33,7 +33,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tokio_stream::StreamExt;
 
@@ -54,6 +54,7 @@ pub struct Message {
     #[serde(skip)]
     requested_at: Instant,
     time: chrono::DateTime<chrono::Utc>,
+    generation_time: Option<Duration>,
     #[serde(skip)]
     clicked_copy: bool,
     is_error: bool,
@@ -79,6 +80,7 @@ impl Default for Message {
             files: Vec::new(),
             is_prepending: false,
             is_thought: false,
+            generation_time: None,
         }
     }
 }
@@ -176,6 +178,10 @@ impl Message {
                         .left()
                         - f;
                     ui.add_enabled(false, egui::Label::new(&self.model.to_string()));
+                    if let Some(duration) = self.generation_time {
+                        ui.weak(format!("({:.1}s)", duration.as_secs_f64()))
+                            .on_hover_text("Generation time");
+                    }
                     offset
                 }
             })
@@ -931,6 +937,9 @@ impl Chat {
                             if current_response_msg.is_thought {
                                 // "Thoughts" have just ended. Turn off the spinner for them.
                                 current_response_msg.is_generating = false;
+                                current_response_msg.generation_time =
+                                    Some(current_response_msg.requested_at.elapsed());
+
 
                                 // And create a NEW, separate message for the final answer.
                                 // This will keep the thought block on screen.
@@ -986,11 +995,13 @@ impl Chat {
                         .with_icon(Icon::Error)
                         .open();
                     message.is_generating = false;
+                    message.generation_time = Some(message.requested_at.elapsed());
                 }
 
                 if let Some(last_msg) = self.messages.last_mut() {
                     if last_msg.is_generating {
                         last_msg.is_generating = false;
+                        last_msg.generation_time = Some(last_msg.requested_at.elapsed());
                     }
                 }
             });

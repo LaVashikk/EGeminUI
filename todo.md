@@ -1,6 +1,6 @@
 - [ ] Censor settings (default)
 - [X] Message deletion
-- [ ] Show total message generation time
+- [X] Show total message generation time
 - [ ] Tokens counter
 - [ ] click to file opened it (?)
 - [X] Handle mime types properly
