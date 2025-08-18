@@ -41,6 +41,54 @@ pub enum GeminiModel {
 
     #[serde(rename = "gemini-2.5-flash")]
     Gemini25Flash,
+
+    #[serde(rename = "gemini-1.5-flash")]
+    Gemini15Flash,
+
+    #[serde(rename = "gemini-1.5-flash-8b")]
+    Gemini15Flash8b,
+
+    #[serde(rename = "gemini-2.5-flash-preview-05-20")]
+    Gemini25FlashPreview0520,
+
+    #[serde(rename = "gemini-2.0-flash-thinking-exp-01-21")]
+    Gemini20FlashThinkingExp0121,
+
+    #[serde(rename = "gemini-2.0-flash-thinking-exp-1219")]
+    Gemini20FlashThinkingExp1219,
+
+    #[serde(rename = "gemma-3-1b-it")]
+    Gemma31bIt,
+
+    #[serde(rename = "gemma-3-4b-it")]
+    Gemma34bIt,
+
+    #[serde(rename = "gemma-3-12b-it")]
+    Gemma312bIt,
+
+    #[serde(rename = "gemma-3-27b-it")]
+    Gemma327bIt,
+
+    #[serde(rename = "gemma-3n-e4b-it")]
+    Gemma3nE4bIt,
+
+    #[serde(rename = "gemma-3n-e2b-it")]
+    Gemma3nE2bIt,
+
+
+    // Models for paid quota
+    #[serde(rename = "gemini-1.5-pro")]
+    Gemini15Pro,
+
+    #[serde(rename = "gemini-2.5-pro-preview-03-25")]
+    Gemini25ProPreview0325,
+
+    #[serde(rename = "gemini-2.5-pro-preview-05-06")]
+    Gemini25ProPreview0506,
+
+    #[serde(rename = "gemini-2.5-pro-preview-06-05")]
+    Gemini25ProPreview0605,
+
     // To add a new model, simply add a new variant here
     // and its corresponding `rename` attribute.
     // #[serde(rename = "new-model-name")]

@@ -1,4 +1,5 @@
-- [ ] Censor settings (default)
+- [ ] Sefety settings by default to NoneBlock
+- [X] add more models!
 - [X] Message deletion
 - [X] Show total message generation time
 - [ ] Tokens counter
