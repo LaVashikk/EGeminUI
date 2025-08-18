@@ -21,7 +21,7 @@ use flowync::{error::Compact, CompactFlower, CompactHandle};
 use gemini_client_api::gemini::{
     ask::Gemini,
     types::{
-        request::{Part, SystemInstruction},
+        request::{Part, SystemInstruction, SafetySetting, BlockThreshold, HarmCategory},
         response::GeminiResponseStream,
         sessions::Session,
     },
@@ -36,6 +36,27 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio_stream::StreamExt;
+
+
+const SAFETY_SETTINGS: [SafetySetting; 4] = [
+    SafetySetting {
+        category: HarmCategory::HarmCategoryHarassment,
+        threshold: BlockThreshold::BlockNone
+    },
+    SafetySetting {
+        category: HarmCategory::HarmCategoryHateSpeech,
+        threshold: BlockThreshold::BlockNone
+    },
+    SafetySetting {
+        category: HarmCategory::HarmCategorySexuallyExplicit,
+        threshold: BlockThreshold::BlockNone
+    },
+    SafetySetting {
+        category: HarmCategory::HarmCategoryDangerousContent,
+        threshold: BlockThreshold::BlockNone
+    }
+];
+
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 enum Role {
@@ -784,7 +805,8 @@ impl Chat {
 
         let gemini = self
             .model_picker
-            .create_client(&settings.api_key, settings.proxy_path.clone());
+            .create_client(&settings.api_key, settings.proxy_path.clone())
+            .set_safety_settings(Some(SAFETY_SETTINGS.to_vec()));
 
         tokio::spawn(async move {
             handle.activate();
