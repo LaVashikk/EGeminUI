@@ -37,7 +37,10 @@ pub async fn convert_file_to_part(path: &Path) -> Result<Part> {
     let mime_type = mime_guess::from_path(path).first_or_octet_stream();
     let mut mime_str = mime_type.to_string();
 
-    if &mime_str == "application/json" {
+
+    if (mime_str.starts_with("application") && mime_str != "application/pdf")
+        || (mime_str.starts_with("text")    && mime_str != "text/plain")
+    {
         mime_str = "text/plain".to_string();
     }
 

@@ -18,7 +18,8 @@ const IMAGE_FORMATS: &[&str] = &[
 ];
 const VIDEO_FORMATS: &[&str] = &["mp4", "mpeg", "mov", "avi", "flv", "webm"];
 const TEXT_FORMATS: &[&str] = &[
-    "txt", "md", "rs", "py", "js", "html", "css", "json", "toml", "yaml", "log", "csv", "pdf",
+    "txt", "md", "rs", "py", "js", "html", "css", "json", "toml", "yaml", "log", "csv",
+    "xml", "pdf",
 ];
 const MUSIC_FORMATS: &[&str] = &[
     "aac", "flac", "mp3", "m4a", "mpeg", "mpga", "opus", "pcm", "wav", "webm", "aiff", "ogg",
