@@ -500,15 +500,20 @@ async fn request_completion(
         // Update the author for the current (or new) group.
         current_author_is_user = Some(message_author_is_user);
 
-        if !message.content.is_empty() {
-            parts_buffer.push(Part::text(message.content.clone().into()));
-        }
-
         for file_path in &message.files {
             match convert_file_to_part(file_path).await {
-                Ok(part) => parts_buffer.push(part),
+                Ok(part) => {
+                    parts_buffer.push(Part::text(
+                        format!("File with name: {}", file_path.file_name().unwrap_or_default().to_string_lossy()).into()
+                    ));
+                    parts_buffer.push(part)
+                },
                 Err(e) => log::error!("Failed to convert file {}: {}", file_path.display(), e), // todo say to ui
             }
+        }
+
+        if !message.content.is_empty() {
+            parts_buffer.push(Part::text(message.content.clone().into()));
         }
     }
 
@@ -524,7 +529,7 @@ async fn request_completion(
         }
     }
 
-    // dbg!(&gemini_session);
+    dbg!(&gemini_session);
 
     // Handle the prepended text for regeneration // TODO BROKEN!
     if let Some(msg) = messages.get(index) {

@@ -1,6 +1,6 @@
 - [ ] Censor settings (default)
 - [ ] Message deletion
-- [ ] Handle mime types properly
+- [X] Handle mime types properly
 - [ ] Cache uploaded files
 - [ ] Display code snippets properly
 - [ ] Show total message generation time
@@ -9,3 +9,4 @@
 - [ ] Tokens counter
 - [ ] Chat names
 - [ ] code exec?
+- [ ] click to file opened it (?)

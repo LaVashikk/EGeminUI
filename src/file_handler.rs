@@ -131,6 +131,7 @@ pub fn show_files(ui: &mut egui::Ui, files: &mut Vec<PathBuf>, mutate: bool) {
                                     } else {
                                         match mime_type.type_().as_str() {
                                             "video" => "🎬",
+                                            "audio" => "🎶",
                                             // "text" => "",
                                             _ => "📎",
                                         }
