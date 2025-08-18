@@ -1,0 +1,11 @@
+- [ ] Censor settings (default)
+- [ ] Message deletion
+- [ ] Handle mime types properly
+- [ ] Cache uploaded files
+- [ ] Display code snippets properly
+- [ ] Show total message generation time
+- [ ] Option to hide left panel?
+- [X] Check already uploaded files - if invalid, either warn or highlight them orange
+- [ ] Tokens counter
+- [ ] Chat names
+- [ ] code exec?
