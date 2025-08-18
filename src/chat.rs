@@ -121,6 +121,7 @@ enum MessageAction {
     None,
     Retry(usize),
     Regenerate(usize),
+    Delete(usize),
 }
 
 impl Message {
@@ -180,31 +181,8 @@ impl Message {
             })
             .inner;
 
-        if self.is_thought {
-            ui.horizontal(|ui| {
-                ui.add_space(message_offset);
-                let done_thinking = !self.is_generating;
-                Frame::group(ui.style())
-                    .inner_margin(Margin::symmetric(8, 4))
-                    .show(ui, |ui| {
-                        // egui::collapsing_header::CollapsingState::load_with_default_open
-                        egui::CollapsingHeader::new("  Thoughts")
-                            .id_salt(self.time.timestamp_millis())
-                            .default_open(false)
-                            .icon(move |ui, openness, response| {
-                                widgets::thinking_icon(ui, openness, response, done_thinking);
-                            })
-                            .show(ui, |ui| {
-                                CommonMarkViewer::new().show(ui, commonmark_cache, &self.content);
-                            });
-                    });
-            });
-            ui.add_space(4.0);
-            return MessageAction::None;
-        }
-
         let is_commonmark = !self.content.is_empty() && !self.is_error && !self.is_prepending;
-        if is_commonmark {
+        if is_commonmark && !self.is_thought {
             ui.add_space(-TextStyle::Body.resolve(ui.style()).size + 4.0);
         }
 
@@ -279,11 +257,32 @@ impl Message {
                     }
                 });
             } else {
-                CommonMarkViewer::new().max_image_width(Some(512)).show(
-                    ui,
-                    commonmark_cache,
-                    &self.content,
-                );
+                if self.is_thought {
+                    ui.horizontal(|ui| {
+                        let done_thinking = !self.is_generating;
+                        Frame::group(ui.style())
+                            .inner_margin(Margin::symmetric(8, 4))
+                            .show(ui, |ui| {
+                                // egui::collapsing_header::CollapsingState::load_with_default_open
+                                egui::CollapsingHeader::new("  Thoughts")
+                                    .id_salt(self.time.timestamp_millis())
+                                    .default_open(false)
+                                    .icon(move |ui, openness, response| {
+                                        widgets::thinking_icon(ui, openness, response, done_thinking);
+                                    })
+                                    .show(ui, |ui| {
+                                        CommonMarkViewer::new().show(ui, commonmark_cache, &self.content);
+                                    });
+                            });
+                    });
+                    ui.add_space(4.0);
+                } else {
+                    CommonMarkViewer::new().max_image_width(Some(512)).show(
+                        ui,
+                        commonmark_cache,
+                        &self.content,
+                    );
+                }
             }
         });
 
@@ -366,10 +365,11 @@ impl Message {
                     .on_hover_text("Remove")
                     .clicked()
                 {
-                    dbg!("not implemented yer!");
+                    action = MessageAction::Delete(idx);
                 }
 
                 if !self.is_user()
+                    && !self.is_thought
                     && prepend_buf.is_empty()
                     && ui
                         .add(
@@ -1059,6 +1059,7 @@ impl Chat {
         let mut new_speaker: Option<usize> = None;
         let mut any_prepending = false;
         let mut regenerate_response_idx = None;
+         let mut message_to_delete_idx: Option<usize> = None;
         egui::ScrollArea::both()
             .stick_to_bottom(true)
             .auto_shrink(false)
@@ -1089,6 +1090,9 @@ impl Chat {
                             MessageAction::Regenerate(idx) => {
                                 regenerate_response_idx = Some(idx);
                             }
+                            MessageAction::Delete(idx) => {
+                                message_to_delete_idx = Some(idx);
+                            }
                         }
                         any_prepending |= message.is_prepending;
                         if !prev_speaking && message.is_speaking {
@@ -1099,6 +1103,9 @@ impl Chat {
             });
         if let Some(regenerate_idx) = regenerate_response_idx {
             self.regenerate_response(settings, regenerate_idx);
+        }
+        if let Some(idx) = message_to_delete_idx {
+            self.messages.remove(idx);
         }
         new_speaker
     }
