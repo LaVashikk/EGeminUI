@@ -1,14 +1,10 @@
-use std::{fmt, hash::Hash};
+use std::fmt;
 
 use eframe::{
-    egui::{
-        self, collapsing_header::CollapsingState, Color32, CornerRadius, Frame, Layout, RichText,
-        Stroke, Vec2,
-    },
+    egui::{self, collapsing_header::CollapsingState, CornerRadius, Frame, Layout, Stroke, Vec2},
     emath::Numeric,
 };
 use egui_modal::{Icon, Modal};
-use egui_twemoji::EmojiLabel;
 use gemini_client_api::gemini::{ask::Gemini, types::request::SystemInstruction};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -75,7 +71,6 @@ pub enum GeminiModel {
     #[serde(rename = "gemma-3n-e2b-it")]
     Gemma3nE2bIt,
 
-
     // Models for paid quota
     #[serde(rename = "gemini-1.5-pro")]
     Gemini15Pro,
@@ -88,7 +83,6 @@ pub enum GeminiModel {
 
     #[serde(rename = "gemini-2.5-pro-preview-06-05")]
     Gemini25ProPreview0605,
-
     // To add a new model, simply add a new variant here
     // and its corresponding `rename` attribute.
     // #[serde(rename = "new-model-name")]

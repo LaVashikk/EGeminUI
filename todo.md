@@ -1,4 +1,4 @@
-- [ ] Sefety settings by default to NoneBlock
+- [X] Sefety settings by default to NoneBlock
 - [X] add more models!
 - [X] Message deletion
 - [X] Show total message generation time

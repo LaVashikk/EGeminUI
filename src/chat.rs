@@ -7,12 +7,9 @@ use crate::{
     widgets::{self, GeminiModel, ModelPicker, Settings},
 };
 use anyhow::{Context, Result};
-use eframe::{
-    egui::{
-        self, pos2, vec2, Align, Color32, CornerRadius, Frame, Key, KeyboardShortcut, Layout,
-        Margin, Modifiers, Pos2, Rect, Stroke, TextStyle,
-    },
-    epaint::text,
+use eframe::egui::{
+    self, pos2, vec2, Align, Color32, CornerRadius, Frame, Key, KeyboardShortcut, Layout, Margin,
+    Modifiers, Pos2, Rect, Stroke, TextStyle,
 };
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 use egui_modal::{Icon, Modal};
@@ -21,8 +18,7 @@ use flowync::{error::Compact, CompactFlower, CompactHandle};
 use gemini_client_api::gemini::{
     ask::Gemini,
     types::{
-        request::{Part, SystemInstruction, SafetySetting, BlockThreshold, HarmCategory},
-        response::GeminiResponseStream,
+        request::{BlockThreshold, HarmCategory, Part, SafetySetting},
         sessions::Session,
     },
 };
@@ -37,26 +33,24 @@ use std::{
 };
 use tokio_stream::StreamExt;
 
-
 const SAFETY_SETTINGS: [SafetySetting; 4] = [
     SafetySetting {
         category: HarmCategory::HarmCategoryHarassment,
-        threshold: BlockThreshold::BlockNone
+        threshold: BlockThreshold::BlockNone,
     },
     SafetySetting {
         category: HarmCategory::HarmCategoryHateSpeech,
-        threshold: BlockThreshold::BlockNone
+        threshold: BlockThreshold::BlockNone,
     },
     SafetySetting {
         category: HarmCategory::HarmCategorySexuallyExplicit,
-        threshold: BlockThreshold::BlockNone
+        threshold: BlockThreshold::BlockNone,
     },
     SafetySetting {
         category: HarmCategory::HarmCategoryDangerousContent,
-        threshold: BlockThreshold::BlockNone
-    }
+        threshold: BlockThreshold::BlockNone,
+    },
 ];
-
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 enum Role {
@@ -125,7 +119,8 @@ fn tts_control(tts: SharedTts, text: String, speak: bool) {
     });
 }
 
-fn make_short_name(name: &str) -> String {
+fn make_short_name(_name: &str) -> String {
+    // todo stuff
     // todo lmao
     // let mut c = name
     //     .split('/')
@@ -295,10 +290,19 @@ impl Message {
                                     .id_salt(self.time.timestamp_millis())
                                     .default_open(false)
                                     .icon(move |ui, openness, response| {
-                                        widgets::thinking_icon(ui, openness, response, done_thinking);
+                                        widgets::thinking_icon(
+                                            ui,
+                                            openness,
+                                            response,
+                                            done_thinking,
+                                        );
                                     })
                                     .show(ui, |ui| {
-                                        CommonMarkViewer::new().show(ui, commonmark_cache, &self.content);
+                                        CommonMarkViewer::new().show(
+                                            ui,
+                                            commonmark_cache,
+                                            &self.content,
+                                        );
                                     });
                             });
                     });
@@ -334,7 +338,7 @@ impl Message {
         }
 
         // copy buttons and such
-        let shift_held = !ui.ctx().wants_keyboard_input() && ui.input(|i| i.modifiers.shift);
+        // let shift_held = !ui.ctx().wants_keyboard_input() && ui.input(|i| i.modifiers.shift);
 
         if !self.is_generating && !self.is_error {
             ui.add_space(2.0);
@@ -469,7 +473,7 @@ impl Default for Chat {
 }
 
 async fn request_completion(
-    mut gemini: Gemini,
+    gemini: Gemini,
     messages: Vec<Message>,
     handle: &CompletionFlowerHandle,
     stop_generating: Arc<AtomicBool>,
@@ -531,10 +535,14 @@ async fn request_completion(
             match convert_file_to_part(file_path).await {
                 Ok(part) => {
                     parts_buffer.push(Part::text(
-                        format!("File with name: {}", file_path.file_name().unwrap_or_default().to_string_lossy()).into()
+                        format!(
+                            "File with name: {}",
+                            file_path.file_name().unwrap_or_default().to_string_lossy()
+                        )
+                        .into(),
                     ));
                     parts_buffer.push(part)
-                },
+                }
                 Err(e) => log::error!("Failed to convert file {}: {}", file_path.display(), e), // todo say to ui
             }
         }
@@ -935,10 +943,10 @@ impl Chat {
         self.flower
             .extract(|(idx, part)| {
                 last_processed_idx = idx;
-                let model = self
-                    .messages
-                    .get(idx - 1)
-                    .map_or(GeminiModel::default(), |m| m.model);
+                // let model = self // todo remove?
+                //     .messages
+                //     .get(idx - 1)
+                //     .map_or(GeminiModel::default(), |m| m.model);
 
                 match part {
                     Part::text(data) => {
@@ -962,7 +970,6 @@ impl Chat {
                                 current_response_msg.generation_time =
                                     Some(current_response_msg.requested_at.elapsed());
 
-
                                 // And create a NEW, separate message for the final answer.
                                 // This will keep the thought block on screen.
                                 let model = current_response_msg.model;
@@ -981,7 +988,7 @@ impl Chat {
                 }
             })
             .finalize(|result| {
-                if let Ok((idx, _)) = result {
+                if let Ok((_, _)) = result {
                 } else if let Err(e) = result {
                     let (idx, msg) = match e {
                         Compact::Panicked(e) => {
@@ -1092,7 +1099,7 @@ impl Chat {
         let mut new_speaker: Option<usize> = None;
         let mut any_prepending = false;
         let mut regenerate_response_idx = None;
-         let mut message_to_delete_idx: Option<usize> = None;
+        let mut message_to_delete_idx: Option<usize> = None;
         egui::ScrollArea::both()
             .stick_to_bottom(true)
             .auto_shrink(false)

@@ -1426,44 +1426,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
-name = "ellama"
-version = "0.4.0"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "base64-stream",
- "bytesize",
- "chrono",
- "eframe",
- "egui-modal",
- "egui-notify",
- "egui-twemoji",
- "egui_commonmark",
- "egui_extras",
- "egui_virtual_list",
- "enum-iterator",
- "env_logger",
- "fastrand",
- "flowync",
- "gemini-client-api",
- "image",
- "log",
- "mime_guess",
- "open",
- "openssl",
- "parking_lot",
- "rfd",
- "ron 0.10.1",
- "serde",
- "serde_json",
- "timeago",
- "tokio",
- "tokio-stream",
- "tts",
- "url",
-]
-
-[[package]]
 name = "emath"
 version = "0.31.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1930,6 +1892,44 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "gemini-gui"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "base64-stream",
+ "bytesize",
+ "chrono",
+ "eframe",
+ "egui-modal",
+ "egui-notify",
+ "egui-twemoji",
+ "egui_commonmark",
+ "egui_extras",
+ "egui_virtual_list",
+ "enum-iterator",
+ "env_logger",
+ "fastrand",
+ "flowync",
+ "gemini-client-api",
+ "image",
+ "log",
+ "mime_guess",
+ "open",
+ "openssl",
+ "parking_lot",
+ "rfd",
+ "ron 0.10.1",
+ "serde",
+ "serde_json",
+ "timeago",
+ "tokio",
+ "tokio-stream",
+ "tts",
+ "url",
 ]
 
 [[package]]

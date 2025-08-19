@@ -37,9 +37,8 @@ pub async fn convert_file_to_part(path: &Path) -> Result<Part> {
     let mime_type = mime_guess::from_path(path).first_or_octet_stream();
     let mut mime_str = mime_type.to_string();
 
-
     if (mime_str.starts_with("application") && mime_str != "application/pdf")
-        || (mime_str.starts_with("text")    && mime_str != "text/plain")
+        || (mime_str.starts_with("text") && mime_str != "text/plain")
     {
         mime_str = "text/plain".to_string();
     }
@@ -103,9 +102,13 @@ pub fn show_files(ui: &mut egui::Ui, files: &mut Vec<PathBuf>, mutate: bool) {
         let mime_type = mime_guess::from_path(&file_path).first_or_octet_stream();
 
         let is_exist = file_path.exists();
-        let frame_color = if is_exist { egui::Color32::GRAY } else { egui::Color32::ORANGE };
-        let custom_frame = egui::Frame::group(ui.style())
-            .stroke(egui::Stroke::new(1.0, frame_color));
+        let frame_color = if is_exist {
+            egui::Color32::GRAY
+        } else {
+            egui::Color32::ORANGE
+        };
+        let custom_frame =
+            egui::Frame::group(ui.style()).stroke(egui::Stroke::new(1.0, frame_color));
 
         let resp = custom_frame
             .show(ui, |ui| {
@@ -150,18 +153,14 @@ pub fn show_files(ui: &mut egui::Ui, files: &mut Vec<PathBuf>, mutate: bool) {
                     if !is_exist {
                         text.to_mut().push_str(" (FILE NOT FOUND)");
                     }
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(text).small(),
-                        )
-                        .truncate(),
-                    )
+                    ui.add(egui::Label::new(RichText::new(text).small()).truncate())
                 });
             })
             .response;
 
         // again stupid hacks for egu
-        let interact_resp = ui.interact(resp.rect, resp.id.with("interact"), egui::Sense::click())
+        let interact_resp = ui
+            .interact(resp.rect, resp.id.with("interact"), egui::Sense::click())
             .on_hover_text(&path_string);
         if interact_resp.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);

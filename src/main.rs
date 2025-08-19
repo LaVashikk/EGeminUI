@@ -2,7 +2,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
 use eframe::egui;
-use gemini_client_api::gemini::ask::Gemini;
 use sessions::Sessions;
 mod chat;
 mod easymark;
@@ -18,8 +17,8 @@ const IMAGE_FORMATS: &[&str] = &[
 ];
 const VIDEO_FORMATS: &[&str] = &["mp4", "mpeg", "mov", "avi", "flv", "webm"];
 const TEXT_FORMATS: &[&str] = &[
-    "txt", "md", "rs", "py", "js", "html", "css", "json", "toml", "yaml", "log", "csv",
-    "xml", "pdf",
+    "txt", "md", "rs", "py", "js", "html", "css", "json", "toml", "yaml", "log", "csv", "xml",
+    "pdf",
 ];
 const MUSIC_FORMATS: &[&str] = &[
     "aac", "flac", "mp3", "m4a", "mpeg", "mpga", "opus", "pcm", "wav", "webm", "aiff", "ogg",
@@ -76,7 +75,7 @@ impl Ellama {
         );
 
         if let Some(storage) = cc.storage {
-            if let Some(mut app_state) = eframe::get_value::<Self>(storage, eframe::APP_KEY) {
+            if let Some(app_state) = eframe::get_value::<Self>(storage, eframe::APP_KEY) {
                 log::debug!("app state successfully restored from storage");
                 return app_state;
             }

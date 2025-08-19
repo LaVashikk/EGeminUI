@@ -1,26 +1,20 @@
 [package]
-name = "ellama"
-description = "Friendly interface to chat with an Ollama instance."
-version = "0.4.0"
+name = "gemini-gui"
+description = "Friendly interface to chat with an Gemini API."
+version = "0.1.0"
 edition = "2021"
 license = "Unlicense OR MIT OR Apache-2.0"
 readme = "README.md"
 exclude = ["media/**"]
-documentation = "https://docs.rs/ellama"
+# documentation = "https://docs.rs/ellama"
 categories = ["visualization", "gui"]
-keywords = ["llama", "ollama", "llm", "ai", "egui", "gui", "ui"]
-homepage = "https://github.com/zeozeozeo/ellama"
-repository = "https://github.com/zeozeozeo/ellama"
-authors = ["zeozeozeo <i@zeo.lol>"]
+keywords = ["gemini", "llm", "ai", "egui", "gui", "ui"]
+homepage = "https://github.com/LaVashikk/Gemini-eGUI"
+repository = "https://github.com/LaVashikk/Gemini-eGUI"
+authors = ["LaVashik <me@lavashik.dev>"]
 
-[lints.rust]
-unused = { level = "allow", priority = -1 } # For exploratory dev.
-
-[package.metadata.wix]
-upgrade-guid = "0A1DD80C-A3CE-4FF9-87D6-E42AE70FA2D3"
-path-guid = "978B4217-AC4F-48DC-BF7B-AA02673D1E39"
-license = false
-eula = false
+# [lints.rust]
+# unused = { level = "allow", priority = -1 } # For exploratory dev.
 
 [dependencies]
 eframe = { version = "0.31.1", default-features = false, features = [

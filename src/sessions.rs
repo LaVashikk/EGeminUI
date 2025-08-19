@@ -9,12 +9,11 @@ use egui_notify::{Toast, Toasts};
 use egui_twemoji::EmojiLabel;
 use egui_virtual_list::VirtualList;
 use flowync::{CompactFlower, CompactHandle};
-use gemini_client_api::gemini::ask::Gemini;
 #[cfg(feature = "tts")]
 use parking_lot::RwLock;
 #[cfg(feature = "tts")]
 use std::sync::Arc;
-use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc, time::Instant};
+use std::{cell::RefCell, path::PathBuf, rc::Rc, time::Instant};
 #[cfg(feature = "tts")]
 use tts::Tts;
 
@@ -192,11 +191,6 @@ fn preview_files_being_dropped(ctx: &egui::Context) {
 }
 
 impl Sessions {
-    pub fn new() -> Self {
-        // todo
-        Self::default()
-    }
-
     pub fn show(&mut self, ctx: &egui::Context) {
         // check if tts stopped speaking
         #[cfg(feature = "tts")]
@@ -317,8 +311,9 @@ impl Sessions {
                         crate::VIDEO_FORMATS,
                         crate::TEXT_FORMATS,
                         crate::MUSIC_FORMATS,
-                    ].concat();
-                    
+                    ]
+                    .concat();
+
                     if !all_formats.contains(&ext.to_lowercase().as_str()) {
                         log::warn!(
                             "dropped file `{}` has unsupported extension `{ext}`",
