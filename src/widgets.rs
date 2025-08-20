@@ -160,11 +160,12 @@ impl ModelPicker {
             None
         };
 
-        let mut client = Gemini::new(
+        let mut client = Gemini::new_with_timeout(
             api_key.to_string(),
             self.selected.to_string(),
             sys_prompt,
             proxy_path,
+            std::time::Duration::from_secs(60),
         );
 
         let val = client.set_generation_config();

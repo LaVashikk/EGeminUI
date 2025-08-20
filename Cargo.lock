@@ -1877,7 +1877,7 @@ dependencies = [
 [[package]]
 name = "gemini-client-api"
 version = "5.4.7"
-source = "git+https://github.com/LaVashikk/llms-client#714e02686c873344d8409c676532818069b876b1"
+source = "git+https://github.com/LaVashikk/llms-client#72583c7ad81c0e10cdde246b510a1de8699d65a0"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -1885,7 +1885,6 @@ dependencies = [
  "futures",
  "getset",
  "mime",
- "open",
  "pin-project-lite",
  "regex",
  "reqwest",
@@ -2752,7 +2751,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07033963ba89ebaf1584d767badaa2e8fcec21aedea6b8c0346d487d49c28667"
 dependencies = [
  "cfg-if",
- "windows-targets 0.53.3",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
